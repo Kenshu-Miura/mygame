@@ -140,7 +140,7 @@ func (g *Game) Update() error {
 			g.oses = append(g.oses, &O{x: g.x + float64(img.Bounds().Dx())*scale/2, y: g.y})
 		}
 	}
-	if g.oOutsideCount >= 10 && inpututil.IsKeyJustPressed(ebiten.KeyUp) {
+	if !g.gameOver && g.oOutsideCount >= 10 && inpututil.IsKeyJustPressed(ebiten.KeyUp) {
 		g.oOutsideCount -= 10
 		ufoCount := 0
 		for _, ufo := range g.ufos {
