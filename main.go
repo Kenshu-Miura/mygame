@@ -7,10 +7,15 @@ import (
 	"math/rand"
 	"time"
 
+	"github.com/hajimehoshi/ebiten/v2/examples/resources/fonts"
+	"golang.org/x/image/font"
+	"golang.org/x/image/font/opentype"
+
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/audio"
 	"github.com/hajimehoshi/ebiten/v2/audio/wav"
 	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
+
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
 	"github.com/hajimehoshi/ebiten/v2/text"
 	"golang.org/x/image/font/basicfont"
@@ -34,6 +39,7 @@ type Game struct {
 	bashiHebis                 []*BashiHebi
 	gameOver                   bool
 	oOutsideCount              int
+	state                      string
 }
 
 type O struct {
@@ -56,16 +62,32 @@ func (g *Game) resetGame() {
 	g.ufos = []*UFO{} // Reset the ufos slice
 	g.score = 0       // Reset the score
 	g.bashiHebis = []*BashiHebi{}
+	g.state = "title"
 }
 
 var (
 	img, ufoImg, oImg, bashiHebiImg *ebiten.Image
 	game                            = &Game{}
 	audioContext                    = audio.NewContext(48000)
+	mplusNormalFont                 font.Face
 )
 
 func init() {
-	var err error
+	tt, err := opentype.Parse(fonts.MPlus1pRegular_ttf)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	const dpi = 72
+	mplusNormalFont, err = opentype.NewFace(tt, &opentype.FaceOptions{
+		Size:    24,
+		DPI:     dpi,
+		Hinting: font.HintingVertical,
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	img, err = loadImage("ebisan.png")
 	if err != nil {
 		log.Fatal(err)
@@ -126,6 +148,13 @@ func loadSound(filePath string) (*audio.Player, error) {
 }
 
 func (g *Game) Update() error {
+	if g.state == "title" {
+		if inpututil.IsKeyJustPressed(ebiten.KeyEnter) {
+			g.state = "game"
+		}
+		return nil
+	}
+
 	const speed = 4
 	if !g.gameOver {
 		if ebiten.IsKeyPressed(ebiten.KeyLeft) && g.x > 0 {
@@ -223,6 +252,32 @@ func (g *Game) Update() error {
 }
 
 func (g *Game) Draw(screen *ebiten.Image) {
+	if g.state == "title" {
+		textHeight := 24                   // または適切なテキストの高さに設定
+		y := screenHeight/2 + textHeight/2 // これでyは "Press Enter to Start" のテキストのy座標になります。
+
+		japaneseText := "UFO撃ち落としたことありますか？"
+		japaneseTextWidth := text.BoundString(mplusNormalFont, japaneseText).Dx()
+		xJapanese := (screenWidth - japaneseTextWidth) / 2
+		yJapanese := y - textHeight - 10 // 10 is a padding between the two texts
+		text.Draw(screen, japaneseText, mplusNormalFont, xJapanese, yJapanese, color.White)
+
+		titleText := "Press Enter to Start"
+		textWidth := text.BoundString(mplusNormalFont, titleText).Dx()
+		textHeight = text.BoundString(mplusNormalFont, titleText).Dy()
+		x := (screenWidth - textWidth) / 2
+		y = (screenHeight-textHeight)/2 + textHeight // textHeight is added to y to align the text properly
+		text.Draw(screen, titleText, mplusNormalFont, x, y, color.White)
+
+		infoText := "KIEE Countが10以上の時に↑を押すと…"
+		infoTextWidth := text.BoundString(mplusNormalFont, infoText).Dx()
+		xInfo := (screenWidth - infoTextWidth) / 2
+		yInfo := y + textHeight + 10 // 10 is a padding between the texts
+		text.Draw(screen, infoText, mplusNormalFont, xInfo, yInfo, color.White)
+
+		return
+	}
+
 	opts := &ebiten.DrawImageOptions{}
 	opts.GeoM.Scale(scale, scale)
 	opts.GeoM.Translate(g.x, g.y)
@@ -249,7 +304,12 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	}
 
 	if g.gameOver {
-		text.Draw(screen, "GAME OVER", basicfont.Face7x13, screenWidth/2-50, screenHeight/2, color.White)
+		text.Draw(screen, "GAME OVER", mplusNormalFont, screenWidth/2-50, screenHeight/2, color.White)
+		instructionText := "To restart the game, press the Esc key."
+		instructionWidth := text.BoundString(mplusNormalFont, instructionText).Dx()
+		xInstruction := (screenWidth - instructionWidth) / 2
+		yInstruction := screenHeight/2 + 40 // 40はテキスト間のパディングです
+		text.Draw(screen, instructionText, mplusNormalFont, xInstruction, yInstruction, color.White)
 		return
 	}
 
