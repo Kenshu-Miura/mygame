@@ -11,10 +11,11 @@ import (
 	"golang.org/x/image/font"
 	"golang.org/x/image/font/opentype"
 
-	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/audio"
-	"github.com/hajimehoshi/ebiten/v2/audio/wav"
 	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
+
+	"github.com/hajimehoshi/ebiten/v2"
+	"github.com/hajimehoshi/ebiten/v2/audio/wav"
 
 	"github.com/hajimehoshi/ebiten/v2/inpututil"
 	"github.com/hajimehoshi/ebiten/v2/text"
@@ -70,6 +71,9 @@ var (
 	game                            = &Game{}
 	audioContext                    = audio.NewContext(48000)
 	mplusNormalFont                 font.Face
+	bgmPlayer                       *audio.Player
+	majidePlayer                    *audio.Player
+	majidePlayed                    bool
 )
 
 func init() {
@@ -123,6 +127,16 @@ func init() {
 		log.Fatal(err)
 	}
 
+	bgmPlayer, err = loadSound("BGM.wav")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	majidePlayer, err = loadSound("majide.wav") // majide.wavを読み込む
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	rand.Seed(time.Now().UnixNano())
 
 	game.resetGame()
@@ -151,6 +165,8 @@ func (g *Game) Update() error {
 	if g.state == "title" {
 		if inpututil.IsKeyJustPressed(ebiten.KeyEnter) {
 			g.state = "game"
+			bgmPlayer.Rewind() // BGMを最初から再生する
+			bgmPlayer.Play()   // BGMを再生する
 		}
 		return nil
 	}
@@ -246,6 +262,18 @@ func (g *Game) Update() error {
 			g.oOutsideCount++
 			g.oses = append(g.oses[:i], g.oses[i+1:]...)
 		}
+	}
+
+	if g.gameOver {
+		bgmPlayer.Pause() // BGMの再生を停止する
+		if !majidePlayed {
+			majidePlayer.Rewind() // majidePlayerを巻き戻す
+			majidePlayer.Play()   // majide.wavを再生する
+			majidePlayed = true   // majide.wavが再生されたことを記録する
+		}
+		return nil
+	} else {
+		majidePlayed = false // gameOverがfalseの場合、majidePlayedをリセットする
 	}
 
 	return nil
