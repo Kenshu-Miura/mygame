@@ -1,7 +1,10 @@
 package main
 
 import (
+	"fmt"
 	"log"
+	"math/rand"
+	"time"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/audio"
@@ -12,61 +15,74 @@ import (
 
 const (
 	scale        = 0.1
-	startingUfoX = 640 // Starting from the right edge of the screen
-	startingUfoY = 0   // Starting from the top of the screen
+	startingUfoX = 640
+	startingUfoY = 0
 	speed        = 4
+	screenWidth  = 640
+	screenHeight = 480
 )
 
-var (
-	img, ufoImg, oImg         *ebiten.Image
-	x, y, ufoX, ufoY          float64
-	oses                      []*O
-	sound, hitSound           *audio.Player
-	ufoVisible                bool = true
-	audioContext                   = audio.NewContext(48000)
-	game                      *Game
-	screenWidth, screenHeight int
-)
-
-type Game struct{}
+type Game struct {
+	x, y            float64
+	oses            []*O
+	sound, hitSound *audio.Player
+	ufos            []*UFO
+	score           int
+}
 
 type O struct {
 	x, y float64
 }
 
-func resetGame() {
-	screenWidth, screenHeight = 640, 480 // これらの変数の初期値を設定します
-	x = float64(screenWidth)/2 - float64(img.Bounds().Dx())*scale/2
-	y = float64(screenHeight)*1.1 - float64(img.Bounds().Dy())*scale
-	ufoX = float64(640)
-	ufoY = 0
-	oses = []*O{}
-	ufoVisible = true
+type UFO struct {
+	x, y    float64
+	visible bool
 }
 
+func (g *Game) resetGame() {
+	g.x = float64(screenWidth)/2 - float64(img.Bounds().Dx())*scale/2
+	g.y = float64(screenHeight)*1.1 - float64(img.Bounds().Dy())*scale
+	g.oses = []*O{}
+	g.ufos = []*UFO{} // Reset the ufos slice
+	g.score = 0       // Reset the score
+}
+
+var (
+	img, ufoImg, oImg *ebiten.Image
+	game              = &Game{}
+	audioContext      = audio.NewContext(48000)
+)
+
 func init() {
-	screenWidth, screenHeight = 640, 480
 	var err error
 	img, err = loadImage("ebisan.png")
-	checkError(err)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	ufoImg, err = loadImage("ufo.png")
-	checkError(err)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	oImg, err = loadImage("o.png")
-	checkError(err)
+	if err != nil {
+		log.Fatal(err)
+	}
 
-	sound, err = loadSound("shot.wav")
-	checkError(err)
+	game.sound, err = loadSound("shot.wav")
+	if err != nil {
+		log.Fatal(err)
+	}
 
-	hitSound, err = loadSound("hit.wav")
-	checkError(err)
+	game.hitSound, err = loadSound("hit.wav")
+	if err != nil {
+		log.Fatal(err)
+	}
 
-	// Set the initial position of the UFO
-	ufoX = startingUfoX
-	ufoY = startingUfoY
+	rand.Seed(time.Now().UnixNano())
 
-	resetGame()
+	game.resetGame()
 }
 
 func loadImage(filePath string) (*ebiten.Image, error) {
@@ -88,40 +104,49 @@ func loadSound(filePath string) (*audio.Player, error) {
 	return audioContext.NewPlayer(soundStream)
 }
 
-func checkError(err error) {
-	if err != nil {
-		log.Fatal(err)
-	}
-}
-
 func (g *Game) Update() error {
 	const speed = 4
-	if ebiten.IsKeyPressed(ebiten.KeyLeft) && x > 0 {
-		x -= speed
+	if ebiten.IsKeyPressed(ebiten.KeyLeft) && g.x > 0 {
+		g.x -= speed
 	}
-	if ebiten.IsKeyPressed(ebiten.KeyRight) && x < float64(640)-float64(img.Bounds().Dx())*scale {
-		x += speed
+	if ebiten.IsKeyPressed(ebiten.KeyRight) && g.x < float64(640)-float64(img.Bounds().Dx())*scale {
+		g.x += speed
 	}
 
 	if inpututil.IsKeyJustPressed(ebiten.KeySpace) {
-		sound.Rewind()
-		sound.Play()
-		oses = append(oses, &O{x: x + float64(img.Bounds().Dx())*scale/2, y: y})
+		g.sound.Rewind()
+		g.sound.Play()
+		g.oses = append(g.oses, &O{x: g.x + float64(img.Bounds().Dx())*scale/2, y: g.y})
 	}
-	for _, o := range oses {
-		o.y -= 2
-		// Check for collision between "o" and the UFO
-		if ufoVisible && o.x >= ufoX && o.x <= ufoX+float64(ufoImg.Bounds().Dx()) && o.y >= ufoY && o.y <= ufoY+float64(ufoImg.Bounds().Dy()) {
-			ufoVisible = false // Hide the UFO if a collision is detected
-			hitSound.Rewind()  // Rewind the sound to the beginning
-			hitSound.Play()    // Play the hit sound
+	for oIndex, o := range g.oses {
+		for _, ufo := range g.ufos {
+			if ufo.visible && o.x >= ufo.x && o.x <= ufo.x+float64(ufoImg.Bounds().Dx()) && o.y >= ufo.y && o.y <= ufo.y+float64(ufoImg.Bounds().Dy()) {
+				ufo.visible = false
+				g.hitSound.Rewind()
+				g.hitSound.Play()
+				g.score++
+
+				// Remove the "o" object from oses slice
+				g.oses = append(g.oses[:oIndex], g.oses[oIndex+1:]...)
+				break // Break out of the inner loop as the o object has been removed
+			}
 		}
 	}
-	// Update the position of the UFO
-	ufoX -= 2 // Move the UFO to the left
 
 	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
-		resetGame() // Escキーが押されたときにresetGame関数を呼び出します
+		g.resetGame()
+	}
+
+	if rand.Intn(100) < 1 {
+		g.ufos = append(g.ufos, &UFO{x: startingUfoX, y: float64(rand.Intn(screenHeight / 2)), visible: true})
+	}
+
+	for _, ufo := range g.ufos {
+		ufo.x -= 2
+	}
+
+	for _, o := range g.oses {
+		o.y -= 2 // これにより"o.png"が上に移動します
 	}
 
 	return nil
@@ -130,18 +155,21 @@ func (g *Game) Update() error {
 func (g *Game) Draw(screen *ebiten.Image) {
 	opts := &ebiten.DrawImageOptions{}
 	opts.GeoM.Scale(scale, scale)
-	opts.GeoM.Translate(x, y)
+	opts.GeoM.Translate(g.x, g.y)
 	screen.DrawImage(img, opts)
-	for _, o := range oses {
+	ebitenutil.DebugPrint(screen, fmt.Sprintf("Score: %d", g.score))
+	for _, o := range g.oses {
 		opts := &ebiten.DrawImageOptions{}
 		opts.GeoM.Translate(o.x, o.y)
-		screen.DrawImage(oImg, opts) // Draw the "o" image instead of using DebugPrintAt
+		screen.DrawImage(oImg, opts)
 	}
-	// Draw the UFO
-	if ufoVisible {
-		opts := &ebiten.DrawImageOptions{}
-		opts.GeoM.Translate(ufoX, ufoY)
-		screen.DrawImage(ufoImg, opts)
+
+	for _, ufo := range g.ufos {
+		if ufo.visible {
+			opts := &ebiten.DrawImageOptions{}
+			opts.GeoM.Translate(ufo.x, ufo.y)
+			screen.DrawImage(ufoImg, opts)
+		}
 	}
 }
 
@@ -150,7 +178,6 @@ func (g *Game) Layout(outsideWidth, outsideHeight int) (screenWidth, screenHeigh
 }
 
 func main() {
-	game = &Game{} // gameインスタンスを初期化します
 	ebiten.SetWindowSize(1280, 960)
 	ebiten.SetWindowTitle("Hello, Ebisan!")
 	if err := ebiten.RunGame(game); err != nil {
