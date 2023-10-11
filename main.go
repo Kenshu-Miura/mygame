@@ -26,13 +26,14 @@ const (
 )
 
 type Game struct {
-	x, y            float64
-	oses            []*O
-	sound, hitSound *audio.Player
-	ufos            []*UFO
-	score           int
-	bashiHebis      []*BashiHebi
-	gameOver        bool
+	x, y                       float64
+	oses                       []*O
+	sound, hitSound, kieeSound *audio.Player
+	ufos                       []*UFO
+	score                      int
+	bashiHebis                 []*BashiHebi
+	gameOver                   bool
+	oOutsideCount              int
 }
 
 type O struct {
@@ -95,6 +96,11 @@ func init() {
 		log.Fatal(err)
 	}
 
+	game.kieeSound, err = loadSound("kiee.wav")
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	rand.Seed(time.Now().UnixNano())
 
 	game.resetGame()
@@ -134,6 +140,21 @@ func (g *Game) Update() error {
 			g.oses = append(g.oses, &O{x: g.x + float64(img.Bounds().Dx())*scale/2, y: g.y})
 		}
 	}
+	if g.oOutsideCount >= 10 && inpututil.IsKeyJustPressed(ebiten.KeyUp) {
+		g.oOutsideCount -= 10
+		ufoCount := 0
+		for _, ufo := range g.ufos {
+			if ufo.visible && ufo.x+float64(ufoImg.Bounds().Dx()) >= 0 { // Check if UFO is on screen
+				ufo.visible = false
+				ufoCount++
+			}
+		}
+		g.kieeSound.Rewind()
+		g.kieeSound.Play()
+		g.score += ufoCount
+		g.ufos = nil       // Clear the UFO slice
+		g.bashiHebis = nil // Clear the BashiHebi slice
+	}
 
 	for oIndex, o := range g.oses {
 		for _, ufo := range g.ufos {
@@ -153,6 +174,7 @@ func (g *Game) Update() error {
 	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
 		g.resetGame()
 		g.gameOver = false // 追加
+		g.oOutsideCount = 0
 	}
 
 	if rand.Intn(100) < 2 {
@@ -190,6 +212,13 @@ func (g *Game) Update() error {
 		}
 	}
 
+	for i := len(g.oses) - 1; i >= 0; i-- {
+		if g.oses[i].y < 0 {
+			g.oOutsideCount++
+			g.oses = append(g.oses[:i], g.oses[i+1:]...)
+		}
+	}
+
 	return nil
 }
 
@@ -223,6 +252,9 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		text.Draw(screen, "GAME OVER", basicfont.Face7x13, screenWidth/2-50, screenHeight/2, color.White)
 		return
 	}
+
+	countText := fmt.Sprintf("KIEE Count: %d", g.oOutsideCount)
+	text.Draw(screen, countText, basicfont.Face7x13, 1, 23, color.White)
 }
 
 func (g *Game) Layout(outsideWidth, outsideHeight int) (screenWidth, screenHeight int) {
