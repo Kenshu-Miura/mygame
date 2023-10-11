@@ -1,10 +1,7 @@
 package main
 
 import (
-	"bytes"
-	"io/ioutil"
 	"log"
-	"os"
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/audio"
@@ -48,6 +45,7 @@ func resetGame() {
 }
 
 func init() {
+	screenWidth, screenHeight = 640, 480
 	var err error
 	img, err = loadImage("ebisan.png")
 	checkError(err)
@@ -77,19 +75,12 @@ func loadImage(filePath string) (*ebiten.Image, error) {
 }
 
 func loadSound(filePath string) (*audio.Player, error) {
-	soundFile, err := os.Open(filePath)
-	if err != nil {
-		return nil, err
-	}
-	defer soundFile.Close()
-
-	soundData, err := ioutil.ReadAll(soundFile)
+	file, err := ebitenutil.OpenFile(filePath)
 	if err != nil {
 		return nil, err
 	}
 
-	soundBuffer := bytes.NewReader(soundData)
-	soundStream, err := wav.DecodeWithSampleRate(48000, soundBuffer)
+	soundStream, err := wav.DecodeWithSampleRate(48000, file)
 	if err != nil {
 		return nil, err
 	}
@@ -159,9 +150,10 @@ func (g *Game) Layout(outsideWidth, outsideHeight int) (screenWidth, screenHeigh
 }
 
 func main() {
+	game = &Game{} // gameインスタンスを初期化します
 	ebiten.SetWindowSize(1280, 960)
 	ebiten.SetWindowTitle("Hello, Ebisan!")
-	if err := ebiten.RunGame(game); err != nil { // gameインスタンスを使ってゲームを実行します
+	if err := ebiten.RunGame(game); err != nil {
 		log.Fatal(err)
 	}
 }
