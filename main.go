@@ -73,6 +73,7 @@ func (g *Game) resetGame() {
 	g.state = "title"
 	g.ebis = []*Ebi{}
 	g.bashiHebiSpeed = 1
+	g.spawnRate = 0.001
 }
 
 var (
