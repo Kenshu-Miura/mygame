@@ -32,16 +32,17 @@ const (
 )
 
 type Game struct {
-	x, y                       float64
-	oses                       []*O
-	sound, hitSound, kieeSound *audio.Player
-	ufos                       []*UFO
-	score                      int
-	bashiHebis                 []*BashiHebi
-	gameOver                   bool
-	oOutsideCount              int
-	state                      string
-	bashiHebiSpeed             float64
+	x, y                                   float64
+	oses                                   []*O
+	sound, hitSound, kieeSound, kieeSound2 *audio.Player
+	ufos                                   []*UFO
+	score                                  int
+	bashiHebis                             []*BashiHebi
+	gameOver                               bool
+	oOutsideCount                          int
+	state                                  string
+	bashiHebiSpeed                         float64
+	ebis                                   []*Ebi
 }
 
 type O struct {
@@ -57,6 +58,10 @@ type BashiHebi struct {
 	x, y float64
 }
 
+type Ebi struct {
+	x, y float64
+}
+
 func (g *Game) resetGame() {
 	g.x = float64(screenWidth)/2 - float64(img.Bounds().Dx())*scale/2
 	g.y = float64(screenHeight)*1.1 - float64(img.Bounds().Dy())*scale
@@ -69,13 +74,13 @@ func (g *Game) resetGame() {
 }
 
 var (
-	img, ufoImg, oImg, bashiHebiImg *ebiten.Image
-	game                            = &Game{}
-	audioContext                    = audio.NewContext(48000)
-	mplusNormalFont                 font.Face
-	bgmPlayer                       *audio.Player
-	majidePlayer                    *audio.Player
-	majidePlayed                    bool
+	img, ufoImg, oImg, bashiHebiImg, ebiImg *ebiten.Image
+	game                                    = &Game{}
+	audioContext                            = audio.NewContext(48000)
+	mplusNormalFont                         font.Face
+	bgmPlayer                               *audio.Player
+	majidePlayer                            *audio.Player
+	majidePlayed                            bool
 )
 
 func init() {
@@ -114,6 +119,11 @@ func init() {
 		log.Fatal(err)
 	}
 
+	ebiImg, err = loadImage("ebi.png")
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	game.sound, err = loadSound("shot.wav")
 	if err != nil {
 		log.Fatal(err)
@@ -125,6 +135,11 @@ func init() {
 	}
 
 	game.kieeSound, err = loadSound("kiee.wav")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	game.kieeSound2, err = loadSound("kiee2.wav")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -198,9 +213,12 @@ func (g *Game) Update() error {
 		}
 		g.kieeSound.Rewind()
 		g.kieeSound.Play()
+		g.kieeSound2.Rewind()
+		g.kieeSound2.Play()
 		g.score += ufoCount
 		g.ufos = nil       // Clear the UFO slice
 		g.bashiHebis = nil // Clear the BashiHebi slice
+		g.ebis = nil       // Clear the Ebi slice
 	}
 
 	for oIndex, o := range g.oses {
@@ -301,6 +319,31 @@ func (g *Game) Update() error {
 		}
 	}
 
+	if rand.Intn(100) < 2 {
+		g.ebis = append(g.ebis, &Ebi{x: float64(screenWidth), y: float64(rand.Intn(screenHeight / 2))})
+	}
+	for _, ebi := range g.ebis {
+		ebi.x -= 2
+	}
+	for i := len(g.ebis) - 1; i >= 0; i-- {
+		if g.ebis[i].x+float64(ebiImg.Bounds().Dx()) < 0 {
+			g.ebis = append(g.ebis[:i], g.ebis[i+1:]...)
+		}
+	}
+	for oIndex, o := range g.oses {
+		for ebiIndex, ebi := range g.ebis {
+			if o.x >= ebi.x && o.x <= ebi.x+float64(ebiImg.Bounds().Dx()) &&
+				o.y >= ebi.y && o.y <= ebi.y+float64(ebiImg.Bounds().Dy()) {
+				// 当たり判定
+				g.oses = append(g.oses[:oIndex], g.oses[oIndex+1:]...)
+				g.ebis = append(g.ebis[:ebiIndex], g.ebis[ebiIndex+1:]...)
+				g.hitSound.Rewind()
+				g.hitSound.Play()
+				g.score-- // スコアを減点
+				break
+			}
+		}
+	}
 	return nil
 }
 
@@ -354,6 +397,12 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		opts := &ebiten.DrawImageOptions{}
 		opts.GeoM.Translate(bh.x, bh.y)
 		screen.DrawImage(bashiHebiImg, opts)
+	}
+
+	for _, ebi := range g.ebis {
+		op := &ebiten.DrawImageOptions{}
+		op.GeoM.Translate(ebi.x, ebi.y)
+		screen.DrawImage(ebiImg, op)
 	}
 
 	if g.gameOver {
