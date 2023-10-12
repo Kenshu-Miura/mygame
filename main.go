@@ -5,6 +5,7 @@ import (
 	"image/color"
 	"log"
 	"math/rand"
+	"os"
 	"time"
 
 	"github.com/hajimehoshi/ebiten/v2/examples/resources/fonts"
@@ -44,6 +45,7 @@ type Game struct {
 	bashiHebiSpeed                                    float64
 	ebis                                              []*Ebi
 	spawnRate                                         float64
+	r                                                 *rand.Rand
 }
 
 type O struct {
@@ -74,6 +76,7 @@ func (g *Game) resetGame() {
 	g.ebis = []*Ebi{}
 	g.bashiHebiSpeed = 1
 	g.spawnRate = 0.001
+	g.r = rand.New(rand.NewSource(time.Now().UnixNano()))
 }
 
 var (
@@ -162,8 +165,6 @@ func init() {
 		log.Fatal(err)
 	}
 
-	rand.Seed(time.Now().UnixNano())
-
 	game.resetGame()
 }
 
@@ -173,7 +174,7 @@ func loadImage(filePath string) (*ebiten.Image, error) {
 }
 
 func loadSound(filePath string) (*audio.Player, error) {
-	file, err := ebitenutil.OpenFile(filePath)
+	file, err := os.Open(filePath)
 	if err != nil {
 		return nil, err
 	}
@@ -252,8 +253,8 @@ func (g *Game) Update() error {
 		g.oOutsideCount = 0
 	}
 
-	if rand.Intn(120) < 2 {
-		g.ufos = append(g.ufos, &UFO{x: startingUfoX, y: float64(rand.Intn(screenHeight / 2)), visible: true})
+	if g.r.Intn(120) < 2 {
+		g.ufos = append(g.ufos, &UFO{x: startingUfoX, y: float64(g.r.Intn(screenHeight / 2)), visible: true})
 	}
 
 	// UFOとbashihebiの動きを更新する前にgameOverフラグをチェック
@@ -278,8 +279,8 @@ func (g *Game) Update() error {
 
 	if !g.gameOver {
 		g.spawnRate += 0.0005 // あるいは適切な値に設定
-		if rand.Intn(165) < int(g.spawnRate) {
-			g.bashiHebis = append(g.bashiHebis, &BashiHebi{x: float64(rand.Intn(screenWidth)), y: 0})
+		if g.r.Intn(165) < int(g.spawnRate) {
+			g.bashiHebis = append(g.bashiHebis, &BashiHebi{x: float64(g.r.Intn(screenWidth)), y: 0})
 		}
 	}
 
@@ -333,8 +334,8 @@ func (g *Game) Update() error {
 		}
 	}
 
-	if rand.Intn(130) < 1 {
-		g.ebis = append(g.ebis, &Ebi{x: float64(screenWidth), y: float64(rand.Intn(screenHeight / 2))})
+	if g.r.Intn(130) < 1 {
+		g.ebis = append(g.ebis, &Ebi{x: float64(screenWidth), y: float64(g.r.Intn(screenHeight / 2))})
 	}
 	for _, ebi := range g.ebis {
 		ebi.x -= 2
@@ -372,20 +373,23 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		y := screenHeight/2 + textHeight/2 // これでyは "Press Enter to Start" のテキストのy座標になります。
 
 		japaneseText := "UFO撃ち落としたことありますか？"
-		japaneseTextWidth := text.BoundString(mplusNormalFont, japaneseText).Dx()
+		_, advance := font.BoundString(mplusNormalFont, japaneseText)
+		japaneseTextWidth := advance.Ceil()
 		xJapanese := (screenWidth - japaneseTextWidth) / 2
 		yJapanese := y - textHeight - 10 // 10 is a padding between the two texts
 		text.Draw(screen, japaneseText, mplusNormalFont, xJapanese, yJapanese, color.White)
 
 		titleText := "Press Space to Start"
-		textWidth := text.BoundString(mplusNormalFont, titleText).Dx()
-		textHeight = text.BoundString(mplusNormalFont, titleText).Dy()
+		_, advance = font.BoundString(mplusNormalFont, titleText)
+		textWidth := advance.Ceil()
+		textHeight = mplusNormalFont.Metrics().Height.Ceil()
 		x := (screenWidth - textWidth) / 2
 		y = (screenHeight-textHeight)/2 + textHeight // textHeight is added to y to align the text properly
 		text.Draw(screen, titleText, mplusNormalFont, x, y, color.White)
 
 		infoText := "KIEE Countが20以上の時に↑を押すと…"
-		infoTextWidth := text.BoundString(mplusNormalFont, infoText).Dx()
+		_, advanceInfo := font.BoundString(mplusNormalFont, infoText)
+		infoTextWidth := advanceInfo.Ceil()
 		xInfo := (screenWidth - infoTextWidth) / 2
 		yInfo := y + textHeight + 10 // 10 is a padding between the texts
 		text.Draw(screen, infoText, mplusNormalFont, xInfo, yInfo, color.White)
@@ -427,7 +431,8 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	if g.gameOver {
 		text.Draw(screen, "GAME OVER", mplusNormalFont, screenWidth/2-50, screenHeight/2, color.White)
 		instructionText := "To restart the game, press the Esc key."
-		instructionWidth := text.BoundString(mplusNormalFont, instructionText).Dx()
+		_, advanceInstruction := font.BoundString(mplusNormalFont, instructionText)
+		instructionWidth := advanceInstruction.Ceil()
 		xInstruction := (screenWidth - instructionWidth) / 2
 		yInstruction := screenHeight/2 + 40 // 40はテキスト間のパディングです
 		text.Draw(screen, instructionText, mplusNormalFont, xInstruction, yInstruction, color.White)
