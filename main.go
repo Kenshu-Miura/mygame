@@ -41,6 +41,7 @@ type Game struct {
 	gameOver                   bool
 	oOutsideCount              int
 	state                      string
+	bashiHebiSpeed             float64
 }
 
 type O struct {
@@ -64,6 +65,7 @@ func (g *Game) resetGame() {
 	g.score = 0       // Reset the score
 	g.bashiHebis = []*BashiHebi{}
 	g.state = "title"
+	g.bashiHebiSpeed = 1
 }
 
 var (
@@ -232,8 +234,12 @@ func (g *Game) Update() error {
 		for _, ufo := range g.ufos {
 			ufo.x -= 2
 		}
+		if g.state == "game" {
+			g.bashiHebiSpeed += 0.001 // あるいは適切な値に設定
+		}
+
 		for _, bashihebi := range g.bashiHebis {
-			bashihebi.y += 2
+			bashihebi.y += g.bashiHebiSpeed
 		}
 	}
 
@@ -241,7 +247,7 @@ func (g *Game) Update() error {
 		o.y -= 2 // これにより"o.png"が上に移動します
 	}
 
-	if !g.gameOver && rand.Intn(200) < 1 { // 1%の確率で新しいBashiHebiを生成
+	if !g.gameOver && rand.Intn(170) < 1 { // 1%の確率で新しいBashiHebiを生成
 		g.bashiHebis = append(g.bashiHebis, &BashiHebi{x: float64(rand.Intn(screenWidth)), y: 0})
 	}
 
@@ -275,6 +281,24 @@ func (g *Game) Update() error {
 		return nil
 	} else {
 		majidePlayed = false // gameOverがfalseの場合、majidePlayedをリセットする
+	}
+
+	for i := len(g.ufos) - 1; i >= 0; i-- {
+		if g.ufos[i].x+float64(ufoImg.Bounds().Dx()) < 0 || g.ufos[i].x > float64(screenWidth) {
+			g.ufos = append(g.ufos[:i], g.ufos[i+1:]...)
+		}
+	}
+
+	for i := len(g.oses) - 1; i >= 0; i-- {
+		if g.oses[i].y+float64(oImg.Bounds().Dy()) < 0 || g.oses[i].y > float64(screenHeight) {
+			g.oses = append(g.oses[:i], g.oses[i+1:]...)
+		}
+	}
+
+	for i := len(g.bashiHebis) - 1; i >= 0; i-- {
+		if g.bashiHebis[i].y+float64(bashiHebiImg.Bounds().Dy()) < 0 || g.bashiHebis[i].y > float64(screenHeight) {
+			g.bashiHebis = append(g.bashiHebis[:i], g.bashiHebis[i+1:]...)
+		}
 	}
 
 	return nil
