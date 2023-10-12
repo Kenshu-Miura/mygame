@@ -89,7 +89,7 @@ func (g *Game) resetGame() {
 var (
 	img, ufoImg, oImg, bashiHebiImg, ebiImg *ebiten.Image
 	game                                    = &Game{}
-	audioContext                            = audio.NewContext(22050)
+	audioContext                            = audio.NewContext(48000)
 	mplusNormalFont                         font.Face
 	bgmPlayer                               *audio.Player
 	majidePlayer                            *audio.Player
@@ -186,7 +186,7 @@ func loadSound(filePath string) (*audio.Player, error) {
 		return nil, err
 	}
 
-	soundStream, err := wav.DecodeWithSampleRate(22050, file)
+	soundStream, err := wav.DecodeWithSampleRate(48000, file)
 	if err != nil {
 		return nil, err
 	}
