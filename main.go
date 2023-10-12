@@ -32,17 +32,17 @@ const (
 )
 
 type Game struct {
-	x, y                                   float64
-	oses                                   []*O
-	sound, hitSound, kieeSound, kieeSound2 *audio.Player
-	ufos                                   []*UFO
-	score                                  int
-	bashiHebis                             []*BashiHebi
-	gameOver                               bool
-	oOutsideCount                          int
-	state                                  string
-	bashiHebiSpeed                         float64
-	ebis                                   []*Ebi
+	x, y                                              float64
+	oses                                              []*O
+	sound, hitSound, kieeSound, kieeSound2, hoaaSound *audio.Player
+	ufos                                              []*UFO
+	score                                             int
+	bashiHebis                                        []*BashiHebi
+	gameOver                                          bool
+	oOutsideCount                                     int
+	state                                             string
+	bashiHebiSpeed                                    float64
+	ebis                                              []*Ebi
 }
 
 type O struct {
@@ -140,6 +140,11 @@ func init() {
 	}
 
 	game.kieeSound2, err = loadSound("kiee2.wav")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	game.hoaaSound, err = loadSound("hoaa.wav")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -243,7 +248,7 @@ func (g *Game) Update() error {
 		g.oOutsideCount = 0
 	}
 
-	if rand.Intn(100) < 2 {
+	if rand.Intn(120) < 2 {
 		g.ufos = append(g.ufos, &UFO{x: startingUfoX, y: float64(rand.Intn(screenHeight / 2)), visible: true})
 	}
 
@@ -265,7 +270,7 @@ func (g *Game) Update() error {
 		o.y -= 2 // これにより"o.png"が上に移動します
 	}
 
-	if !g.gameOver && rand.Intn(170) < 1 { // 1%の確率で新しいBashiHebiを生成
+	if !g.gameOver && rand.Intn(165) < 1 { // 1%の確率で新しいBashiHebiを生成
 		g.bashiHebis = append(g.bashiHebis, &BashiHebi{x: float64(rand.Intn(screenWidth)), y: 0})
 	}
 
@@ -319,7 +324,7 @@ func (g *Game) Update() error {
 		}
 	}
 
-	if rand.Intn(100) < 2 {
+	if rand.Intn(130) < 1 {
 		g.ebis = append(g.ebis, &Ebi{x: float64(screenWidth), y: float64(rand.Intn(screenHeight / 2))})
 	}
 	for _, ebi := range g.ebis {
@@ -337,6 +342,8 @@ func (g *Game) Update() error {
 				// 当たり判定
 				g.oses = append(g.oses[:oIndex], g.oses[oIndex+1:]...)
 				g.ebis = append(g.ebis[:ebiIndex], g.ebis[ebiIndex+1:]...)
+				g.hoaaSound.Rewind()
+				g.hoaaSound.Play()
 				g.hitSound.Rewind()
 				g.hitSound.Play()
 				g.score-- // スコアを減点
