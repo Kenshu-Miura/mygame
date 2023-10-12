@@ -43,6 +43,7 @@ type Game struct {
 	state                                             string
 	bashiHebiSpeed                                    float64
 	ebis                                              []*Ebi
+	spawnRate                                         float64
 }
 
 type O struct {
@@ -70,6 +71,7 @@ func (g *Game) resetGame() {
 	g.score = 0       // Reset the score
 	g.bashiHebis = []*BashiHebi{}
 	g.state = "title"
+	g.ebis = []*Ebi{}
 	g.bashiHebiSpeed = 1
 }
 
@@ -185,7 +187,7 @@ func loadSound(filePath string) (*audio.Player, error) {
 
 func (g *Game) Update() error {
 	if g.state == "title" {
-		if inpututil.IsKeyJustPressed(ebiten.KeyEnter) {
+		if inpututil.IsKeyJustPressed(ebiten.KeySpace) {
 			g.state = "game"
 			bgmPlayer.Rewind() // BGMを最初から再生する
 			bgmPlayer.Play()   // BGMを再生する
@@ -207,8 +209,8 @@ func (g *Game) Update() error {
 			g.oses = append(g.oses, &O{x: g.x + float64(img.Bounds().Dx())*scale/2, y: g.y})
 		}
 	}
-	if !g.gameOver && g.oOutsideCount >= 10 && inpututil.IsKeyJustPressed(ebiten.KeyUp) {
-		g.oOutsideCount -= 10
+	if !g.gameOver && g.oOutsideCount >= 20 && inpututil.IsKeyJustPressed(ebiten.KeyUp) {
+		g.oOutsideCount -= 20
 		ufoCount := 0
 		for _, ufo := range g.ufos {
 			if ufo.visible && ufo.x+float64(ufoImg.Bounds().Dx()) >= 0 { // Check if UFO is on screen
@@ -224,6 +226,7 @@ func (g *Game) Update() error {
 		g.ufos = nil       // Clear the UFO slice
 		g.bashiHebis = nil // Clear the BashiHebi slice
 		g.ebis = nil       // Clear the Ebi slice
+		g.oses = nil       // Clear the O slice
 	}
 
 	for oIndex, o := range g.oses {
@@ -267,11 +270,16 @@ func (g *Game) Update() error {
 	}
 
 	for _, o := range g.oses {
-		o.y -= 2 // これにより"o.png"が上に移動します
+		if !g.gameOver {
+			o.y -= 2 // これにより"o.png"が上に移動します
+		}
 	}
 
-	if !g.gameOver && rand.Intn(165) < 1 { // 1%の確率で新しいBashiHebiを生成
-		g.bashiHebis = append(g.bashiHebis, &BashiHebi{x: float64(rand.Intn(screenWidth)), y: 0})
+	if !g.gameOver {
+		g.spawnRate += 0.0005 // あるいは適切な値に設定
+		if rand.Intn(165) < int(g.spawnRate) {
+			g.bashiHebis = append(g.bashiHebis, &BashiHebi{x: float64(rand.Intn(screenWidth)), y: 0})
+		}
 	}
 
 	for _, bh := range g.bashiHebis {
@@ -346,7 +354,10 @@ func (g *Game) Update() error {
 				g.hoaaSound.Play()
 				g.hitSound.Rewind()
 				g.hitSound.Play()
-				g.score-- // スコアを減点
+				g.score -= 2 // スコアを減点
+				if g.score < 0 {
+					g.score = 0
+				}
 				break
 			}
 		}
@@ -365,14 +376,14 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		yJapanese := y - textHeight - 10 // 10 is a padding between the two texts
 		text.Draw(screen, japaneseText, mplusNormalFont, xJapanese, yJapanese, color.White)
 
-		titleText := "Press Enter to Start"
+		titleText := "Press Space to Start"
 		textWidth := text.BoundString(mplusNormalFont, titleText).Dx()
 		textHeight = text.BoundString(mplusNormalFont, titleText).Dy()
 		x := (screenWidth - textWidth) / 2
 		y = (screenHeight-textHeight)/2 + textHeight // textHeight is added to y to align the text properly
 		text.Draw(screen, titleText, mplusNormalFont, x, y, color.White)
 
-		infoText := "KIEE Countが10以上の時に↑を押すと…"
+		infoText := "KIEE Countが20以上の時に↑を押すと…"
 		infoTextWidth := text.BoundString(mplusNormalFont, infoText).Dx()
 		xInfo := (screenWidth - infoTextWidth) / 2
 		yInfo := y + textHeight + 10 // 10 is a padding between the texts
