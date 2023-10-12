@@ -46,6 +46,13 @@ type Game struct {
 	ebis                                              []*Ebi
 	spawnRate                                         float64
 	r                                                 *rand.Rand
+	imgDx                                             int
+	imgDy                                             int
+	oImgBounds                                        image.Rectangle
+	ufoBounds                                         image.Rectangle
+	oBounds                                           image.Rectangle
+	ebiBounds                                         image.Rectangle
+	bashiHebiBounds                                   image.Rectangle
 }
 
 type O struct {
@@ -187,30 +194,104 @@ func loadSound(filePath string) (*audio.Player, error) {
 	return audioContext.NewPlayer(soundStream)
 }
 
-func (g *Game) Update() error {
-	if g.state == "title" {
-		if inpututil.IsKeyJustPressed(ebiten.KeySpace) {
-			g.state = "game"
-			bgmPlayer.Rewind() // BGMを最初から再生する
-			bgmPlayer.Play()   // BGMを再生する
-		}
-		return nil
+func (g *Game) cacheImageBounds() {
+	if g.imgDx == 0 || g.imgDy == 0 {
+		g.imgDx = img.Bounds().Dx()
+		g.imgDy = img.Bounds().Dy()
 	}
 
+	if g.oImgBounds.Empty() {
+		g.oImgBounds = oImg.Bounds()
+	}
+	if g.ufoBounds.Empty() {
+		g.ufoBounds = ufoImg.Bounds()
+	}
+	if g.oBounds.Empty() {
+		g.oBounds = oImg.Bounds()
+	}
+	if g.ebiBounds.Empty() {
+		g.ebiBounds = ebiImg.Bounds()
+	}
+	if g.bashiHebiBounds.Empty() {
+		g.bashiHebiBounds = bashiHebiImg.Bounds()
+	}
+}
+
+func (g *Game) handlePlayerMovement() {
 	const speed = 4
 	if !g.gameOver {
 		if ebiten.IsKeyPressed(ebiten.KeyLeft) && g.x > 0 {
 			g.x -= speed
 		}
-		if ebiten.IsKeyPressed(ebiten.KeyRight) && g.x < float64(640)-float64(img.Bounds().Dx())*scale {
+		if ebiten.IsKeyPressed(ebiten.KeyRight) && g.x < float64(640)-float64(g.imgDx)*scale {
 			g.x += speed
 		}
 		if inpututil.IsKeyJustPressed(ebiten.KeySpace) {
-			g.sound.Rewind()
-			g.sound.Play()
-			g.oses = append(g.oses, &O{x: g.x + float64(img.Bounds().Dx())*scale/2, y: g.y})
+			go func() {
+				g.sound.Rewind()
+				g.sound.Play()
+				g.oses = append(g.oses, &O{x: g.x + float64(g.oImgBounds.Dx())*scale/2, y: g.y})
+			}()
 		}
 	}
+}
+
+func (g *Game) handleCollisionDetection() {
+	for oIndex, o := range g.oses {
+		for _, ufo := range g.ufos {
+			if ufo.visible {
+				ufoRect := g.ufoBounds.Add(image.Pt(int(ufo.x), int(ufo.y)))
+				oRect := g.oBounds.Add(image.Pt(int(o.x), int(o.y)))
+				if ufoRect.Overlaps(oRect) {
+					ufo.visible = false
+					go func() {
+						g.hitSound.Rewind()
+						g.hitSound.Play()
+						g.score++
+					}()
+
+					// Remove the "o" object from oses slice
+					g.oses = append(g.oses[:oIndex], g.oses[oIndex+1:]...)
+					break // Break out of the inner loop as the o object has been removed
+				}
+			}
+		}
+	}
+}
+
+func (g *Game) handleGameOver() {
+	if g.gameOver {
+		bgmPlayer.Pause() // Pause the BGM
+		if !majidePlayed {
+			majidePlayer.Rewind() // Rewind majidePlayer
+			majidePlayer.Play()   // Play majide.wav
+			majidePlayed = true   // Record that majide.wav has been played
+		}
+	} else {
+		majidePlayed = false // Reset majidePlayed if gameOver is false
+	}
+}
+
+func (g *Game) Update() error {
+	if g.state == "title" {
+		if inpututil.IsKeyJustPressed(ebiten.KeySpace) {
+			g.state = "game"
+			go func() {
+				bgmPlayer.Rewind() // BGMを最初から再生する
+				bgmPlayer.Play()   // BGMを再生する
+			}()
+		}
+		return nil
+	}
+
+	g.cacheImageBounds()
+
+	g.handlePlayerMovement()
+
+	g.handleCollisionDetection()
+
+	g.handleGameOver()
+
 	if !g.gameOver && g.oOutsideCount >= 20 && inpututil.IsKeyJustPressed(ebiten.KeyUp) {
 		g.oOutsideCount -= 20
 		ufoCount := 0
@@ -220,37 +301,17 @@ func (g *Game) Update() error {
 				ufoCount++
 			}
 		}
-		g.kieeSound.Rewind()
-		g.kieeSound.Play()
-		g.kieeSound2.Rewind()
-		g.kieeSound2.Play()
+		go func() {
+			g.kieeSound.Rewind()
+			g.kieeSound.Play()
+			g.kieeSound2.Rewind()
+			g.kieeSound2.Play()
+		}()
 		g.score += ufoCount
 		g.ufos = nil       // Clear the UFO slice
 		g.bashiHebis = nil // Clear the BashiHebi slice
 		g.ebis = nil       // Clear the Ebi slice
 		g.oses = nil       // Clear the O slice
-	}
-
-	ufoBounds := ufoImg.Bounds()
-	oBounds := oImg.Bounds()
-
-	for oIndex, o := range g.oses {
-		for _, ufo := range g.ufos {
-			if ufo.visible {
-				ufoRect := ufoBounds.Add(image.Pt(int(ufo.x), int(ufo.y)))
-				oRect := oBounds.Add(image.Pt(int(o.x), int(o.y)))
-				if ufoRect.Overlaps(oRect) {
-					ufo.visible = false
-					g.hitSound.Rewind()
-					g.hitSound.Play()
-					g.score++
-
-					// Remove the "o" object from oses slice
-					g.oses = append(g.oses[:oIndex], g.oses[oIndex+1:]...)
-					break // Break out of the inner loop as the o object has been removed
-				}
-			}
-		}
 	}
 
 	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
@@ -276,6 +337,9 @@ func (g *Game) Update() error {
 		for _, bashihebi := range g.bashiHebis {
 			bashihebi.y += g.bashiHebiSpeed
 		}
+		for _, ebi := range g.ebis {
+			ebi.x -= 2
+		}
 	}
 
 	for _, o := range g.oses {
@@ -291,10 +355,10 @@ func (g *Game) Update() error {
 		}
 	}
 
-	padding := 10 // あるいは適切なパディング値を設定
+	padding := 30 // あるいは適切なパディング値を設定
 	playerRect := image.Rect(int(g.x)+padding, int(g.y)+padding, int(g.x)+int(float64(img.Bounds().Dx())*scale)-padding, int(g.y)+int(float64(img.Bounds().Dy())*scale)-padding)
 	for _, bh := range g.bashiHebis {
-		bhRect := image.Rect(int(bh.x), int(bh.y), int(bh.x)+bashiHebiImg.Bounds().Dx(), int(bh.y)+bashiHebiImg.Bounds().Dy())
+		bhRect := image.Rect(int(bh.x), int(bh.y), int(bh.x)+g.bashiHebiBounds.Dx(), int(bh.y)+g.bashiHebiBounds.Dy())
 		if bhRect.Overlaps(playerRect) {
 			g.gameOver = true
 		}
@@ -311,18 +375,6 @@ func (g *Game) Update() error {
 			g.oOutsideCount++
 			g.oses = append(g.oses[:i], g.oses[i+1:]...)
 		}
-	}
-
-	if g.gameOver {
-		bgmPlayer.Pause() // BGMの再生を停止する
-		if !majidePlayed {
-			majidePlayer.Rewind() // majidePlayerを巻き戻す
-			majidePlayer.Play()   // majide.wavを再生する
-			majidePlayed = true   // majide.wavが再生されたことを記録する
-		}
-		return nil
-	} else {
-		majidePlayed = false // gameOverがfalseの場合、majidePlayedをリセットする
 	}
 
 	for i := len(g.ufos) - 1; i >= 0; i-- {
@@ -346,28 +398,29 @@ func (g *Game) Update() error {
 	if g.r.Intn(130) < 1 {
 		g.ebis = append(g.ebis, &Ebi{x: float64(screenWidth), y: float64(g.r.Intn(screenHeight / 2))})
 	}
-	for _, ebi := range g.ebis {
-		ebi.x -= 2
-	}
+
 	for i := len(g.ebis) - 1; i >= 0; i-- {
 		if g.ebis[i].x+float64(ebiImg.Bounds().Dx()) < 0 {
 			g.ebis = append(g.ebis[:i], g.ebis[i+1:]...)
 		}
 	}
-	ebiBounds := ebiImg.Bounds()
 
 	for oIndex, o := range g.oses {
 		for ebiIndex, ebi := range g.ebis {
-			oRect := oBounds.Add(image.Pt(int(o.x), int(o.y)))
-			ebiRect := ebiBounds.Add(image.Pt(int(ebi.x), int(ebi.y)))
+			oRect := g.oBounds.Add(image.Pt(int(o.x), int(o.y)))
+			ebiRect := g.ebiBounds.Add(image.Pt(int(ebi.x), int(ebi.y)))
 			if oRect.Overlaps(ebiRect) {
 				// 当たり判定
 				g.oses = append(g.oses[:oIndex], g.oses[oIndex+1:]...)
 				g.ebis = append(g.ebis[:ebiIndex], g.ebis[ebiIndex+1:]...)
-				g.hoaaSound.Rewind()
-				g.hoaaSound.Play()
-				g.hitSound.Rewind()
-				g.hitSound.Play()
+				go func() {
+					g.hoaaSound.Rewind()
+					g.hoaaSound.Play()
+				}()
+				go func() {
+					g.hitSound.Rewind()
+					g.hitSound.Play()
+				}()
 				g.score -= 2 // スコアを減点
 				if g.score < 0 {
 					g.score = 0
