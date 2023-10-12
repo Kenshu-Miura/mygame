@@ -218,6 +218,7 @@ func (g *Game) Update() error {
 
 	if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
 		g.resetGame()
+		bgmPlayer.Pause()
 		g.gameOver = false // 追加
 		g.oOutsideCount = 0
 	}
