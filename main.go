@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"image"
 	"image/color"
 	"log"
 	"math/rand"
@@ -230,17 +231,24 @@ func (g *Game) Update() error {
 		g.oses = nil       // Clear the O slice
 	}
 
+	ufoBounds := ufoImg.Bounds()
+	oBounds := oImg.Bounds()
+
 	for oIndex, o := range g.oses {
 		for _, ufo := range g.ufos {
-			if ufo.visible && o.x >= ufo.x && o.x <= ufo.x+float64(ufoImg.Bounds().Dx()) && o.y >= ufo.y && o.y <= ufo.y+float64(ufoImg.Bounds().Dy()) {
-				ufo.visible = false
-				g.hitSound.Rewind()
-				g.hitSound.Play()
-				g.score++
+			if ufo.visible {
+				ufoRect := ufoBounds.Add(image.Pt(int(ufo.x), int(ufo.y)))
+				oRect := oBounds.Add(image.Pt(int(o.x), int(o.y)))
+				if ufoRect.Overlaps(oRect) {
+					ufo.visible = false
+					g.hitSound.Rewind()
+					g.hitSound.Play()
+					g.score++
 
-				// Remove the "o" object from oses slice
-				g.oses = append(g.oses[:oIndex], g.oses[oIndex+1:]...)
-				break // Break out of the inner loop as the o object has been removed
+					// Remove the "o" object from oses slice
+					g.oses = append(g.oses[:oIndex], g.oses[oIndex+1:]...)
+					break // Break out of the inner loop as the o object has been removed
+				}
 			}
 		}
 	}
@@ -283,9 +291,11 @@ func (g *Game) Update() error {
 		}
 	}
 
+	padding := 10 // あるいは適切なパディング値を設定
+	playerRect := image.Rect(int(g.x)+padding, int(g.y)+padding, int(g.x)+int(float64(img.Bounds().Dx())*scale)-padding, int(g.y)+int(float64(img.Bounds().Dy())*scale)-padding)
 	for _, bh := range g.bashiHebis {
-		if bh.x >= g.x && bh.x <= g.x+float64(img.Bounds().Dx())*scale &&
-			bh.y >= g.y && bh.y <= g.y+float64(img.Bounds().Dy())*scale {
+		bhRect := image.Rect(int(bh.x), int(bh.y), int(bh.x)+bashiHebiImg.Bounds().Dx(), int(bh.y)+bashiHebiImg.Bounds().Dy())
+		if bhRect.Overlaps(playerRect) {
 			g.gameOver = true
 		}
 	}
@@ -344,10 +354,13 @@ func (g *Game) Update() error {
 			g.ebis = append(g.ebis[:i], g.ebis[i+1:]...)
 		}
 	}
+	ebiBounds := ebiImg.Bounds()
+
 	for oIndex, o := range g.oses {
 		for ebiIndex, ebi := range g.ebis {
-			if o.x >= ebi.x && o.x <= ebi.x+float64(ebiImg.Bounds().Dx()) &&
-				o.y >= ebi.y && o.y <= ebi.y+float64(ebiImg.Bounds().Dy()) {
+			oRect := oBounds.Add(image.Pt(int(o.x), int(o.y)))
+			ebiRect := ebiBounds.Add(image.Pt(int(ebi.x), int(ebi.y)))
+			if oRect.Overlaps(ebiRect) {
 				// 当たり判定
 				g.oses = append(g.oses[:oIndex], g.oses[oIndex+1:]...)
 				g.ebis = append(g.ebis[:ebiIndex], g.ebis[ebiIndex+1:]...)
