@@ -5,7 +5,6 @@ import (
 	"image/color"
 	"log"
 	"math/rand"
-	"os"
 	"time"
 
 	"github.com/hajimehoshi/ebiten/v2/examples/resources/fonts"
@@ -174,7 +173,7 @@ func loadImage(filePath string) (*ebiten.Image, error) {
 }
 
 func loadSound(filePath string) (*audio.Player, error) {
-	file, err := os.Open(filePath)
+	file, err := ebitenutil.OpenFile(filePath)
 	if err != nil {
 		return nil, err
 	}
