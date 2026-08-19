@@ -133,6 +133,7 @@ type Game struct {
 	random          *rand.Rand
 
 	playerImage   *ebiten.Image
+	backgroundImg *ebiten.Image
 	ufoImage      *ebiten.Image
 	projectileImg *ebiten.Image
 	bashiHebiImg  *ebiten.Image
@@ -157,6 +158,10 @@ func newGame() (*Game, error) {
 		return nil, fmt.Errorf("load font: %w", err)
 	}
 
+	backgroundImage, err := loadImage("space_background.png")
+	if err != nil {
+		return nil, err
+	}
 	playerImage, err := loadImage("ebisan.png")
 	if err != nil {
 		return nil, err
@@ -222,6 +227,7 @@ func newGame() (*Game, error) {
 		debug:          debugModeEnabled(),
 		highScore:      max(0, highScore),
 		highScoreStore: store,
+		backgroundImg:  backgroundImage,
 		playerImage:    playerImage,
 		ufoImage:       ufoImage,
 		projectileImg:  projectileImage,
@@ -883,6 +889,7 @@ func removeAt[T any](values []T, index int) []T {
 }
 
 func (g *Game) Draw(screen *ebiten.Image) {
+	screen.DrawImage(g.backgroundImg, nil)
 	switch g.state {
 	case stateTitle:
 		g.drawTitle(screen)

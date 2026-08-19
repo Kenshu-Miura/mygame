@@ -2,6 +2,8 @@
 
 [Ebitengine](https://ebitengine.org/) で作られた、ブラウザとデスクトップで遊べる2Dシューティングゲームです。
 
+暗い星空と青紫の星雲を描いたドット絵の宇宙背景を採用し、敵・弾・HUDが読み取りやすい明るさに調整しています。
+
 ## 操作方法
 
 | キー | 操作 |
@@ -131,6 +133,7 @@ netlify deploy --prod
 ├── main.go               # ゲーム本体
 ├── main_test.go          # 連射・コンボ・ボス・パワーアップのテスト
 ├── highscore_*.go        # ブラウザ・デスクトップ別のハイスコア保存
+├── space_background.png  # 640×480の宇宙背景ドット絵
 ├── boss_ebi.png          # 巨大海老ボスの透過ドット絵
 ├── web/                  # Webページとゲームiframeのソース
 ├── scripts/build-web.sh  # Netlify / Bash用Webビルド
@@ -143,4 +146,4 @@ netlify deploy --prod
 ## ライセンス・素材
 
 ゲーム内の画像・音声素材を再利用する場合は、各素材の権利を確認してください。Ebitengine本体はApache License 2.0です。
-`boss_ebi.png` は、このゲームのボス素材としてOpenAIの画像生成機能で作成した透過ドット絵です。
+`boss_ebi.png` と `space_background.png` は、このゲームの素材としてOpenAIの画像生成機能で作成したドット絵です。
