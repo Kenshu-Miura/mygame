@@ -140,6 +140,65 @@ func TestEnemySpeedIncreasesByWaveAndIsCapped(t *testing.T) {
 	}
 }
 
+func TestFallingEnemySpeedIncreasesByWaveAndIsCapped(t *testing.T) {
+	if got := fallingEnemySpeedForWave(1); got != fallingSpeedBase {
+		t.Fatalf("wave 1 falling speed = %v, want %v", got, fallingSpeedBase)
+	}
+	for wave := 2; wave <= 10; wave++ {
+		if fallingEnemySpeedForWave(wave) <= fallingEnemySpeedForWave(wave-1) {
+			t.Fatalf("falling speed did not increase from wave %d to %d", wave-1, wave)
+		}
+	}
+	if got := fallingEnemySpeedForWave(100); got != maxFallingSpeed {
+		t.Fatalf("capped falling speed = %v, want %v", got, maxFallingSpeed)
+	}
+}
+
+func TestUFOTargetAndWaveCompletion(t *testing.T) {
+	wants := map[int]int{
+		1:                 5,
+		2:                 6,
+		bossWaveCycle - 1: 8,
+		bossWaveCycle:     0,
+		100:               0,
+		101:               ufoMaxTarget,
+	}
+	for wave, want := range wants {
+		if got := ufoTargetForWave(wave); got != want {
+			t.Fatalf("wave %d UFO target = %d, want %d", wave, got, want)
+		}
+	}
+
+	game := &Game{wave: 1}
+	for defeated := 1; defeated < ufoBaseTarget; defeated++ {
+		if game.recordUFODefeat() {
+			t.Fatalf("wave completed after %d UFOs, before target %d", defeated, ufoBaseTarget)
+		}
+	}
+	if !game.recordUFODefeat() {
+		t.Fatalf("wave did not complete after %d UFOs", ufoBaseTarget)
+	}
+}
+
+func TestPowerUpsRemainWhenStartingNextWave(t *testing.T) {
+	game := &Game{
+		wave:         1,
+		powerUps:     []powerUp{{point: point{x: 12, y: 34}}},
+		powerUpTicks: 120,
+	}
+	game.startWave(2)
+
+	if len(game.powerUps) != 1 || game.powerUps[0].x != 12 || game.powerUps[0].y != 34 {
+		t.Fatalf("power-ups after wave change = %+v, want one unchanged item", game.powerUps)
+	}
+	if game.powerUpTicks != 120 {
+		t.Fatalf("active power-up ticks after wave change = %d, want 120", game.powerUpTicks)
+	}
+	if game.ufoKills != 0 {
+		t.Fatalf("UFO kills after wave change = %d, want 0", game.ufoKills)
+	}
+}
+
 func TestBossMovementUsesBothDirectionsAndBoundedTiming(t *testing.T) {
 	random := rand.New(rand.NewSource(1))
 	seenLeft := false

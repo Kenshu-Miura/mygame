@@ -37,9 +37,10 @@ const (
 	audioSampleRate  = 48_000
 	specialCost      = 20
 	shotInterval     = 10 // At 60 TPS, holding Space fires about six shots per second.
-	waveDuration     = 8 * 60
 	bossWaveCycle    = 5
 	waveBannerTime   = 90
+	ufoBaseTarget    = 5
+	ufoMaxTarget     = 20
 	bossScale        = 0.22
 	bossSpeed        = 1.5
 	bossY            = -18
@@ -58,6 +59,9 @@ const (
 	powerUpDuration  = 10 * 60
 	powerUpShotCount = 3
 	powerUpShotGap   = 12
+	fallingSpeedBase = 1.2
+	fallingSpeedGain = 0.25
+	maxFallingSpeed  = 5
 )
 
 // The raised fingertip is about 11% of the way across ebisan.png.
@@ -118,7 +122,7 @@ type Game struct {
 	shotCooldown    int
 	powerUpTicks    int
 	wave            int
-	waveTicks       int
+	ufoKills        int
 	waveBannerTicks int
 	random          *rand.Rand
 
@@ -323,7 +327,7 @@ func (g *Game) reset() {
 	g.shotCooldown = 0
 	g.powerUpTicks = 0
 	g.wave = 1
-	g.waveTicks = 0
+	g.ufoKills = 0
 	g.waveBannerTicks = waveBannerTime
 	g.random = rand.New(rand.NewSource(time.Now().UnixNano()))
 	g.state = stateTitle
@@ -434,6 +438,13 @@ func (g *Game) recordHit(baseScore int) {
 	g.addScore(baseScore * g.comboMultiplier())
 }
 
+func (g *Game) recordUFODefeat() bool {
+	g.recordHit(1)
+	g.ufoKills++
+	target := ufoTargetForWave(g.wave)
+	return target > 0 && g.ufoKills >= target
+}
+
 func (g *Game) addScore(points int) {
 	g.score = max(0, g.score+points)
 	if g.score <= g.highScore {
@@ -461,6 +472,17 @@ func bossHealthForWave(wave int) int {
 
 func enemySpeedForWave(wave int) float64 {
 	return min(float64(maxEnemySpeed), float64(enemySpeed)+float64(max(0, wave-1))*enemySpeedGain)
+}
+
+func ufoTargetForWave(wave int) int {
+	if isBossWave(wave) {
+		return 0
+	}
+	return min(ufoMaxTarget, ufoBaseTarget+max(0, wave-1))
+}
+
+func fallingEnemySpeedForWave(wave int) float64 {
+	return min(float64(maxFallingSpeed), fallingSpeedBase+float64(max(0, wave-1))*fallingSpeedGain)
 }
 
 func newHorizontalEnemy(imageWidth int, y, speed float64, fromLeft bool) horizontalEnemy {
@@ -503,24 +525,16 @@ func (g *Game) updateWave() {
 	if g.waveBannerTicks > 0 {
 		g.waveBannerTicks--
 	}
-	if g.boss != nil {
-		return
-	}
-	g.waveTicks++
-	if g.waveTicks >= waveDuration {
-		g.startWave(g.wave + 1)
-	}
 }
 
 func (g *Game) startWave(wave int) {
 	g.wave = wave
-	g.waveTicks = 0
+	g.ufoKills = 0
 	g.waveBannerTicks = waveBannerTime
 	g.projectiles = nil
 	g.ufos = nil
 	g.bashiHebis = nil
 	g.ebis = nil
-	g.powerUps = nil
 	g.boss = nil
 
 	if !isBossWave(wave) {
@@ -550,6 +564,7 @@ func (g *Game) handleProjectileCollisions() {
 		projectileRect := g.projectileImg.Bounds().Add(image.Pt(int(projectile.x), int(projectile.y)))
 		hit := false
 		bossDefeated := false
+		waveComplete := false
 
 		if g.boss != nil && projectileRect.Overlaps(g.bossRect()) {
 			g.boss.hp--
@@ -574,8 +589,8 @@ func (g *Game) handleProjectileCollisions() {
 					y: target.y + float64(g.ufoImage.Bounds().Dy()-powerUpSize)/2,
 				}
 				target.visible = false
-				g.recordHit(1)
 				g.maybeDropPowerUp(dropPosition)
+				waveComplete = g.recordUFODefeat()
 				replay(g.hitSound)
 				hit = true
 				break
@@ -605,6 +620,10 @@ func (g *Game) handleProjectileCollisions() {
 			g.finishBossWave()
 			return
 		}
+		if waveComplete {
+			g.startWave(g.wave + 1)
+			return
+		}
 	}
 }
 
@@ -624,6 +643,7 @@ func (g *Game) handleSpecialAttack() {
 	}
 
 	g.missCount -= specialCost
+	waveComplete := false
 	if g.boss != nil {
 		damage := min(bossSpecialHit, g.boss.hp)
 		for range damage {
@@ -636,7 +656,7 @@ func (g *Game) handleSpecialAttack() {
 	} else {
 		for _, target := range g.ufos {
 			if target.visible && target.x+float64(g.ufoImage.Bounds().Dx()) >= 0 {
-				g.recordHit(1)
+				waveComplete = g.recordUFODefeat() || waveComplete
 			}
 		}
 		g.ufos = nil
@@ -646,6 +666,9 @@ func (g *Game) handleSpecialAttack() {
 	g.projectiles = nil
 	replay(g.kieeSound)
 	replay(g.kieeSound2)
+	if waveComplete {
+		g.startWave(g.wave + 1)
+	}
 }
 
 func (g *Game) spawnEnemies() {
@@ -681,6 +704,9 @@ func (g *Game) spawnEnemies() {
 	fallingEnemyChance := min(7, 1+g.wave/2)
 	if g.random.Intn(165) < fallingEnemyChance {
 		g.bashiHebis = append(g.bashiHebis, point{x: float64(g.random.Intn(screenWidth)), y: 0})
+		if g.debug {
+			log.Printf("debug: spawned falling enemy (wave=%d speed=%.2f)", g.wave, fallingEnemySpeedForWave(g.wave))
+		}
 	}
 
 	if g.random.Intn(130) < 1 {
@@ -723,7 +749,7 @@ func (g *Game) moveEntities() {
 	for index := range g.ufos {
 		g.ufos[index].x += g.ufos[index].velocityX
 	}
-	fallingEnemySpeed := 1 + float64(g.wave-1)*0.15
+	fallingEnemySpeed := fallingEnemySpeedForWave(g.wave)
 	for index := range g.bashiHebis {
 		g.bashiHebis[index].y += fallingEnemySpeed
 	}
@@ -864,7 +890,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 func (g *Game) drawTitle(screen *ebiten.Image) {
 	g.drawCenteredText(screen, "UFO撃ち落としたことありますか？", screenHeight/2-34, color.White)
 	g.drawCenteredText(screen, "Spaceキーでスタート", screenHeight/2+6, color.White)
-	g.drawCenteredText(screen, "5ウェーブごとに巨大海老ボス出現！", screenHeight/2+46, color.White)
+	g.drawCenteredText(screen, "UFO撃破ノルマ達成で次のウェーブへ", screenHeight/2+46, color.White)
 	g.drawCenteredText(screen, "連続命中でコンボ倍率アップ", screenHeight/2+86, color.White)
 	g.drawCenteredText(screen, fmt.Sprintf("HIGH SCORE: %d", g.highScore), screenHeight/2+126, color.RGBA{R: 255, G: 220, B: 70, A: 255})
 	if g.debug {
@@ -904,9 +930,9 @@ func (g *Game) drawGame(screen *ebiten.Image) {
 
 	g.drawHUD(screen)
 	if g.waveBannerTicks > 0 {
-		message := fmt.Sprintf("WAVE %d", g.wave)
+		message := fmt.Sprintf("WAVE %d: UFOを%d体倒せ！", g.wave, ufoTargetForWave(g.wave))
 		if isBossWave(g.wave) {
-			message = fmt.Sprintf("BOSS WAVE %d", g.wave)
+			message = fmt.Sprintf("BOSS WAVE %d: ボスを倒せ！", g.wave)
 		}
 		g.drawCenteredText(screen, message, 110, color.White)
 	}
@@ -914,7 +940,11 @@ func (g *Game) drawGame(screen *ebiten.Image) {
 
 func (g *Game) drawHUD(screen *ebiten.Image) {
 	text.Draw(screen, fmt.Sprintf("Score: %d  High: %d", g.score, g.highScore), basicfont.Face7x13, 1, 12, color.White)
-	text.Draw(screen, fmt.Sprintf("Wave: %d", g.wave), basicfont.Face7x13, 1, 25, color.White)
+	waveStatus := fmt.Sprintf("Wave: %d  UFO: %d/%d", g.wave, g.ufoKills, ufoTargetForWave(g.wave))
+	if isBossWave(g.wave) {
+		waveStatus = fmt.Sprintf("Wave: %d  Defeat BOSS", g.wave)
+	}
+	text.Draw(screen, waveStatus, basicfont.Face7x13, 1, 25, color.White)
 	text.Draw(screen, "KIEE", basicfont.Face7x13, 1, 39, color.White)
 	const (
 		gaugeX      = 38
