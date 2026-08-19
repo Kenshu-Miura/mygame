@@ -52,6 +52,12 @@ const (
 	bossDefeatBonus  = 25
 	comboStep        = 5
 	maxComboBonus    = 5
+	powerUpSize      = 20
+	powerUpSpeed     = 1.5
+	powerUpDropRate  = 5 // One in five defeated UFOs drops an item.
+	powerUpDuration  = 10 * 60
+	powerUpShotCount = 3
+	powerUpShotGap   = 12
 )
 
 // The raised fingertip is about 11% of the way across ebisan.png.
@@ -80,6 +86,10 @@ type horizontalEnemy struct {
 	velocityX float64
 }
 
+type powerUp struct {
+	point
+}
+
 type boss struct {
 	point
 	hp             int
@@ -97,13 +107,16 @@ type Game struct {
 	ufos        []ufo
 	bashiHebis  []point
 	ebis        []horizontalEnemy
+	powerUps    []powerUp
 	boss        *boss
 	debug       bool
 
 	score           int
+	highScore       int
 	combo           int
 	missCount       int
 	shotCooldown    int
+	powerUpTicks    int
 	wave            int
 	waveTicks       int
 	waveBannerTicks int
@@ -124,6 +137,8 @@ type Game struct {
 	hoaaSound  *audio.Player
 	bgm        *audio.Player
 	gameOverSE *audio.Player
+
+	highScoreStore highScoreStore
 }
 
 func newGame() (*Game, error) {
@@ -187,22 +202,30 @@ func newGame() (*Game, error) {
 		return nil, err
 	}
 
+	store := newHighScoreStore()
+	highScore, err := store.Load()
+	if err != nil {
+		log.Printf("load high score: %v", err)
+	}
+
 	g := &Game{
-		debug:         debugModeEnabled(),
-		playerImage:   playerImage,
-		ufoImage:      ufoImage,
-		projectileImg: projectileImage,
-		bashiHebiImg:  bashiHebiImage,
-		ebiImage:      ebiImage,
-		bossImage:     bossImage,
-		font:          gameFont,
-		shotSound:     shotSound,
-		hitSound:      hitSound,
-		kieeSound:     kieeSound,
-		kieeSound2:    kieeSound2,
-		hoaaSound:     hoaaSound,
-		bgm:           bgm,
-		gameOverSE:    gameOverSE,
+		debug:          debugModeEnabled(),
+		highScore:      max(0, highScore),
+		highScoreStore: store,
+		playerImage:    playerImage,
+		ufoImage:       ufoImage,
+		projectileImg:  projectileImage,
+		bashiHebiImg:   bashiHebiImage,
+		ebiImage:       ebiImage,
+		bossImage:      bossImage,
+		font:           gameFont,
+		shotSound:      shotSound,
+		hitSound:       hitSound,
+		kieeSound:      kieeSound,
+		kieeSound2:     kieeSound2,
+		hoaaSound:      hoaaSound,
+		bgm:            bgm,
+		gameOverSE:     gameOverSE,
 	}
 	g.reset()
 	return g, nil
@@ -292,11 +315,13 @@ func (g *Game) reset() {
 	g.ufos = nil
 	g.bashiHebis = nil
 	g.ebis = nil
+	g.powerUps = nil
 	g.boss = nil
 	g.score = 0
 	g.combo = 0
 	g.missCount = 0
 	g.shotCooldown = 0
+	g.powerUpTicks = 0
 	g.wave = 1
 	g.waveTicks = 0
 	g.waveBannerTicks = waveBannerTime
@@ -333,6 +358,7 @@ func (g *Game) Update() error {
 	g.handleSpecialAttack()
 	g.spawnEnemies()
 	g.moveEntities()
+	g.handlePowerUpCollisions()
 	g.handlePlayerCollision()
 	g.removeOffscreenEntities()
 	return nil
@@ -354,6 +380,13 @@ func (g *Game) handleDebugInput() {
 		g.missCount = max(g.missCount, specialCost)
 		log.Printf("debug: filled KIEE gauge to %d", g.missCount)
 	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyP) {
+		g.powerUps = append(g.powerUps, powerUp{point: point{
+			x: g.player.x + float64(g.playerImage.Bounds().Dx())*playerScale/2 - powerUpSize/2,
+			y: g.player.y - powerUpSize - 8,
+		}})
+		log.Printf("debug: spawned power-up above player")
+	}
 }
 
 func (g *Game) handlePlayerInput() {
@@ -366,12 +399,21 @@ func (g *Game) handlePlayerInput() {
 	}
 	if g.shouldFire(ebiten.IsKeyPressed(ebiten.KeySpace)) {
 		projectileWidth := float64(g.projectileImg.Bounds().Dx())
-		g.projectiles = append(g.projectiles, point{
-			x: g.player.x + playerWidth*playerFingerTipXRatio - projectileWidth/2,
-			y: g.player.y,
-		})
+		shotX := g.player.x + playerWidth*playerFingerTipXRatio - projectileWidth/2
+		g.fireProjectiles(shotX, g.player.y)
 		replay(g.shotSound)
 	}
+}
+
+func (g *Game) fireProjectiles(x, y float64) {
+	g.projectiles = append(g.projectiles, point{x: x, y: y})
+	if g.powerUpTicks <= 0 {
+		return
+	}
+	g.projectiles = append(g.projectiles,
+		point{x: x - powerUpShotGap, y: y + 4},
+		point{x: x + powerUpShotGap, y: y + 4},
+	)
 }
 
 func (g *Game) shouldFire(spacePressed bool) bool {
@@ -389,7 +431,20 @@ func (g *Game) shouldFire(spacePressed bool) bool {
 
 func (g *Game) recordHit(baseScore int) {
 	g.combo++
-	g.score += baseScore * g.comboMultiplier()
+	g.addScore(baseScore * g.comboMultiplier())
+}
+
+func (g *Game) addScore(points int) {
+	g.score = max(0, g.score+points)
+	if g.score <= g.highScore {
+		return
+	}
+	g.highScore = g.score
+	if g.highScoreStore != nil {
+		if err := g.highScoreStore.Save(g.highScore); err != nil {
+			log.Printf("save high score: %v", err)
+		}
+	}
 }
 
 func (g *Game) comboMultiplier() int {
@@ -465,6 +520,7 @@ func (g *Game) startWave(wave int) {
 	g.ufos = nil
 	g.bashiHebis = nil
 	g.ebis = nil
+	g.powerUps = nil
 	g.boss = nil
 
 	if !isBossWave(wave) {
@@ -484,7 +540,7 @@ func (g *Game) startWave(wave int) {
 }
 
 func (g *Game) finishBossWave() {
-	g.score += bossDefeatBonus * g.comboMultiplier()
+	g.addScore(bossDefeatBonus * g.comboMultiplier())
 	g.startWave(g.wave + 1)
 }
 
@@ -513,8 +569,13 @@ func (g *Game) handleProjectileCollisions() {
 			}
 			targetRect := g.ufoImage.Bounds().Add(image.Pt(int(target.x), int(target.y)))
 			if projectileRect.Overlaps(targetRect) {
+				dropPosition := point{
+					x: target.x + float64(g.ufoImage.Bounds().Dx()-powerUpSize)/2,
+					y: target.y + float64(g.ufoImage.Bounds().Dy()-powerUpSize)/2,
+				}
 				target.visible = false
 				g.recordHit(1)
+				g.maybeDropPowerUp(dropPosition)
 				replay(g.hitSound)
 				hit = true
 				break
@@ -527,7 +588,7 @@ func (g *Game) handleProjectileCollisions() {
 				targetRect := g.ebiImage.Bounds().Add(image.Pt(int(target.x), int(target.y)))
 				if projectileRect.Overlaps(targetRect) {
 					g.ebis = removeAt(g.ebis, ebiIndex)
-					g.score = max(0, g.score-2)
+					g.addScore(-2)
 					g.combo = 0
 					replay(g.hoaaSound)
 					replay(g.hitSound)
@@ -544,6 +605,16 @@ func (g *Game) handleProjectileCollisions() {
 			g.finishBossWave()
 			return
 		}
+	}
+}
+
+func (g *Game) maybeDropPowerUp(position point) {
+	if g.random.Intn(powerUpDropRate) != 0 {
+		return
+	}
+	g.powerUps = append(g.powerUps, powerUp{point: position})
+	if g.debug {
+		log.Printf("debug: power-up dropped at (%.1f,%.1f)", position.x, position.y)
 	}
 }
 
@@ -627,6 +698,9 @@ func (g *Game) spawnEnemies() {
 }
 
 func (g *Game) moveEntities() {
+	if g.powerUpTicks > 0 {
+		g.powerUpTicks--
+	}
 	if g.boss != nil {
 		bossWidth := float64(g.bossImage.Bounds().Dx()) * bossScale
 		g.boss.moveCooldown--
@@ -659,6 +733,39 @@ func (g *Game) moveEntities() {
 	for index := range g.projectiles {
 		g.projectiles[index].y -= projectileSpeed
 	}
+	for index := range g.powerUps {
+		g.powerUps[index].y += powerUpSpeed
+	}
+}
+
+func (g *Game) playerRect() image.Rectangle {
+	const padding = 30
+	return image.Rect(
+		int(g.player.x)+padding,
+		int(g.player.y)+padding,
+		int(g.player.x)+int(float64(g.playerImage.Bounds().Dx())*playerScale)-padding,
+		int(g.player.y)+int(float64(g.playerImage.Bounds().Dy())*playerScale)-padding,
+	)
+}
+
+func (g *Game) handlePowerUpCollisions() {
+	playerRect := g.playerRect()
+	for index := len(g.powerUps) - 1; index >= 0; index-- {
+		item := g.powerUps[index]
+		itemRect := image.Rect(int(item.x), int(item.y), int(item.x)+powerUpSize, int(item.y)+powerUpSize)
+		if !itemRect.Overlaps(playerRect) {
+			continue
+		}
+		g.powerUps = removeAt(g.powerUps, index)
+		g.activatePowerUp()
+		if g.debug {
+			log.Printf("debug: power-up collected (%d ticks)", powerUpDuration)
+		}
+	}
+}
+
+func (g *Game) activatePowerUp() {
+	g.powerUpTicks = powerUpDuration
 }
 
 func (g *Game) bossRect() image.Rectangle {
@@ -677,13 +784,7 @@ func (g *Game) bossRect() image.Rectangle {
 }
 
 func (g *Game) handlePlayerCollision() {
-	const padding = 30
-	playerRect := image.Rect(
-		int(g.player.x)+padding,
-		int(g.player.y)+padding,
-		int(g.player.x)+int(float64(g.playerImage.Bounds().Dx())*playerScale)-padding,
-		int(g.player.y)+int(float64(g.playerImage.Bounds().Dy())*playerScale)-padding,
-	)
+	playerRect := g.playerRect()
 
 	for index := len(g.bashiHebis) - 1; index >= 0; index-- {
 		enemy := g.bashiHebis[index]
@@ -730,6 +831,12 @@ func (g *Game) removeOffscreenEntities() {
 			g.ebis = removeAt(g.ebis, index)
 		}
 	}
+
+	for index := len(g.powerUps) - 1; index >= 0; index-- {
+		if g.powerUps[index].y > screenHeight {
+			g.powerUps = removeAt(g.powerUps, index)
+		}
+	}
 }
 
 func removeAt[T any](values []T, index int) []T {
@@ -759,8 +866,9 @@ func (g *Game) drawTitle(screen *ebiten.Image) {
 	g.drawCenteredText(screen, "Spaceキーでスタート", screenHeight/2+6, color.White)
 	g.drawCenteredText(screen, "5ウェーブごとに巨大海老ボス出現！", screenHeight/2+46, color.White)
 	g.drawCenteredText(screen, "連続命中でコンボ倍率アップ", screenHeight/2+86, color.White)
+	g.drawCenteredText(screen, fmt.Sprintf("HIGH SCORE: %d", g.highScore), screenHeight/2+126, color.RGBA{R: 255, G: 220, B: 70, A: 255})
 	if g.debug {
-		g.drawCenteredText(screen, "DEBUG MODE: 無敵 / B:ボス / K:KIEE", screenHeight/2+126, color.RGBA{R: 255, G: 210, B: 60, A: 255})
+		g.drawCenteredText(screen, "DEBUG MODE: 無敵 / B:ボス / K:KIEE / P:強化", screenHeight/2+158, color.RGBA{R: 255, G: 210, B: 60, A: 255})
 	}
 }
 
@@ -790,6 +898,9 @@ func (g *Game) drawGame(screen *ebiten.Image) {
 	for _, projectile := range g.projectiles {
 		drawImageAt(screen, g.projectileImg, projectile)
 	}
+	for _, item := range g.powerUps {
+		g.drawPowerUp(screen, item)
+	}
 
 	g.drawHUD(screen)
 	if g.waveBannerTicks > 0 {
@@ -802,12 +913,30 @@ func (g *Game) drawGame(screen *ebiten.Image) {
 }
 
 func (g *Game) drawHUD(screen *ebiten.Image) {
-	text.Draw(screen, fmt.Sprintf("Score: %d", g.score), basicfont.Face7x13, 1, 12, color.White)
+	text.Draw(screen, fmt.Sprintf("Score: %d  High: %d", g.score, g.highScore), basicfont.Face7x13, 1, 12, color.White)
 	text.Draw(screen, fmt.Sprintf("Wave: %d", g.wave), basicfont.Face7x13, 1, 25, color.White)
-	text.Draw(screen, fmt.Sprintf("KIEE: %d/%d", min(g.missCount, specialCost), specialCost), basicfont.Face7x13, 1, 38, color.White)
-	text.Draw(screen, fmt.Sprintf("Combo: %d  x%d", g.combo, g.comboMultiplier()), basicfont.Face7x13, 1, 51, color.White)
+	text.Draw(screen, "KIEE", basicfont.Face7x13, 1, 39, color.White)
+	const (
+		gaugeX      = 38
+		gaugeY      = 30
+		gaugeWidth  = 112
+		gaugeHeight = 10
+	)
+	charge := kieeCharge(g.missCount)
+	ebitenutil.DrawRect(screen, gaugeX, gaugeY, gaugeWidth, gaugeHeight, color.RGBA{R: 45, G: 45, B: 60, A: 255})
+	fillColor := color.RGBA{R: 55, G: 190, B: 255, A: 255}
+	if charge >= specialCost {
+		fillColor = color.RGBA{R: 255, G: 215, B: 55, A: 255}
+	}
+	ebitenutil.DrawRect(screen, gaugeX+1, gaugeY+1, kieeGaugeFillWidth(charge, gaugeWidth-2), gaugeHeight-2, fillColor)
+	text.Draw(screen, fmt.Sprintf("%d/%d", charge, specialCost), basicfont.Face7x13, gaugeX+gaugeWidth+5, 39, color.White)
+	text.Draw(screen, fmt.Sprintf("Combo: %d  x%d", g.combo, g.comboMultiplier()), basicfont.Face7x13, 1, 54, color.White)
+	if g.powerUpTicks > 0 {
+		seconds := float64(g.powerUpTicks) / 60
+		text.Draw(screen, fmt.Sprintf("POWER x%d  %.1fs", powerUpShotCount, seconds), basicfont.Face7x13, 1, 68, color.RGBA{R: 255, G: 225, B: 70, A: 255})
+	}
 	if g.debug {
-		text.Draw(screen, "DEBUG: INVINCIBLE  B:BOSS  K:KIEE", basicfont.Face7x13, 1, screenHeight-4, color.RGBA{R: 255, G: 210, B: 60, A: 255})
+		text.Draw(screen, "DEBUG: INVINCIBLE  B:BOSS  K:KIEE  P:POWER", basicfont.Face7x13, 1, screenHeight-4, color.RGBA{R: 255, G: 210, B: 60, A: 255})
 	}
 
 	if g.boss == nil {
@@ -823,6 +952,22 @@ func (g *Game) drawHUD(screen *ebiten.Image) {
 	ebitenutil.DrawRect(screen, barX, barY, barWidth, barHeight, color.RGBA{R: 60, G: 20, B: 20, A: 255})
 	hpWidth := barWidth * float64(max(0, g.boss.hp)) / float64(g.boss.maxHP)
 	ebitenutil.DrawRect(screen, barX, barY, hpWidth, barHeight, color.RGBA{R: 230, G: 45, B: 35, A: 255})
+}
+
+func kieeCharge(missCount int) int {
+	return min(specialCost, max(0, missCount))
+}
+
+func kieeGaugeFillWidth(charge, width int) float64 {
+	return float64(width) * float64(kieeCharge(charge)) / specialCost
+}
+
+func (g *Game) drawPowerUp(screen *ebiten.Image, item powerUp) {
+	border := color.RGBA{R: 255, G: 120, B: 35, A: 255}
+	inside := color.RGBA{R: 255, G: 225, B: 65, A: 255}
+	ebitenutil.DrawRect(screen, item.x, item.y, powerUpSize, powerUpSize, border)
+	ebitenutil.DrawRect(screen, item.x+3, item.y+3, powerUpSize-6, powerUpSize-6, inside)
+	text.Draw(screen, "P", basicfont.Face7x13, int(item.x)+7, int(item.y)+15, color.RGBA{R: 120, G: 35, B: 15, A: 255})
 }
 
 func drawImageAt(screen, img *ebiten.Image, position point) {

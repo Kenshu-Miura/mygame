@@ -5,6 +5,19 @@ import (
 	"testing"
 )
 
+type fakeHighScoreStore struct {
+	saved []int
+}
+
+func (*fakeHighScoreStore) Load() (int, error) {
+	return 0, nil
+}
+
+func (store *fakeHighScoreStore) Save(score int) error {
+	store.saved = append(store.saved, score)
+	return nil
+}
+
 func TestShouldFireWhileSpaceIsHeld(t *testing.T) {
 	game := &Game{}
 	firedAt := make([]int, 0, 3)
@@ -146,5 +159,75 @@ func TestBossMovementUsesBothDirectionsAndBoundedTiming(t *testing.T) {
 		if duration < bossMoveMinTime || duration > bossMoveMinTime+bossMoveVariance {
 			t.Fatalf("boss movement duration %d is outside the configured range", duration)
 		}
+	}
+}
+
+func TestPowerUpCreatesThreeShotsAndExpires(t *testing.T) {
+	game := &Game{}
+	game.fireProjectiles(100, 200)
+	if len(game.projectiles) != 1 {
+		t.Fatalf("normal shot count = %d, want 1", len(game.projectiles))
+	}
+
+	game.projectiles = nil
+	game.activatePowerUp()
+	if game.powerUpTicks != powerUpDuration {
+		t.Fatalf("power-up duration = %d, want %d", game.powerUpTicks, powerUpDuration)
+	}
+	game.fireProjectiles(100, 200)
+	if len(game.projectiles) != powerUpShotCount {
+		t.Fatalf("powered shot count = %d, want %d", len(game.projectiles), powerUpShotCount)
+	}
+	if game.projectiles[0].x != 100 || game.projectiles[1].x != 100-powerUpShotGap || game.projectiles[2].x != 100+powerUpShotGap {
+		t.Fatalf("powered shot positions = %+v", game.projectiles)
+	}
+	game.powerUpTicks = 1
+	game.moveEntities()
+	if game.powerUpTicks != 0 {
+		t.Fatalf("expired power-up ticks = %d, want 0", game.powerUpTicks)
+	}
+}
+
+func TestPowerUpDropUsesConfiguredRate(t *testing.T) {
+	game := &Game{random: rand.New(rand.NewSource(1))}
+	for range powerUpDropRate * 20 {
+		game.maybeDropPowerUp(point{x: 12, y: 34})
+	}
+	if len(game.powerUps) == 0 || len(game.powerUps) == powerUpDropRate*20 {
+		t.Fatalf("power-up drops = %d, want some but not all attempts", len(game.powerUps))
+	}
+	for _, item := range game.powerUps {
+		if item.x != 12 || item.y != 34 {
+			t.Fatalf("power-up position = %+v, want (12,34)", item)
+		}
+	}
+}
+
+func TestKIEEGaugeFillIsClamped(t *testing.T) {
+	const width = 100
+	if got := kieeGaugeFillWidth(-5, width); got != 0 {
+		t.Fatalf("negative gauge width = %v, want 0", got)
+	}
+	if got := kieeGaugeFillWidth(specialCost/2, width); got != width/2 {
+		t.Fatalf("half gauge width = %v, want %d", got, width/2)
+	}
+	if got := kieeGaugeFillWidth(specialCost+10, width); got != width {
+		t.Fatalf("overfilled gauge width = %v, want %d", got, width)
+	}
+}
+
+func TestHighScoreOnlySavesNewRecords(t *testing.T) {
+	store := &fakeHighScoreStore{}
+	game := &Game{score: 10, highScore: 10, highScoreStore: store}
+
+	game.addScore(5)
+	game.addScore(-8)
+	game.addScore(2)
+
+	if game.highScore != 15 {
+		t.Fatalf("high score = %d, want 15", game.highScore)
+	}
+	if len(store.saved) != 1 || store.saved[0] != 15 {
+		t.Fatalf("saved high scores = %v, want [15]", store.saved)
 	}
 }
