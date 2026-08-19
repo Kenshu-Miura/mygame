@@ -25,28 +25,33 @@ import (
 )
 
 const (
-	screenWidth     = 640
-	screenHeight    = 480
-	windowScale     = 2
-	playerScale     = 0.1
-	playerSpeed     = 4
-	projectileSpeed = 2
-	enemySpeed      = 2
-	audioSampleRate = 48_000
-	specialCost     = 20
-	shotInterval    = 10 // At 60 TPS, holding Space fires about six shots per second.
-	waveDuration    = 8 * 60
-	bossWaveCycle   = 5
-	waveBannerTime  = 90
-	bossScale       = 0.22
-	bossSpeed       = 1.5
-	bossBaseHP      = 30
-	bossHPGrowth    = 15
-	bossAttackTime  = 75
-	bossSpecialHit  = 10
-	bossDefeatBonus = 25
-	comboStep       = 5
-	maxComboBonus   = 5
+	screenWidth      = 640
+	screenHeight     = 480
+	windowScale      = 2
+	playerScale      = 0.1
+	playerSpeed      = 4
+	projectileSpeed  = 2
+	enemySpeed       = 2
+	enemySpeedGain   = 0.25
+	maxEnemySpeed    = 6
+	audioSampleRate  = 48_000
+	specialCost      = 20
+	shotInterval     = 10 // At 60 TPS, holding Space fires about six shots per second.
+	waveDuration     = 8 * 60
+	bossWaveCycle    = 5
+	waveBannerTime   = 90
+	bossScale        = 0.22
+	bossSpeed        = 1.5
+	bossY            = -18
+	bossMoveMinTime  = 30
+	bossMoveVariance = 90
+	bossBaseHP       = 30
+	bossHPGrowth     = 15
+	bossAttackTime   = 75
+	bossSpecialHit   = 10
+	bossDefeatBonus  = 25
+	comboStep        = 5
+	maxComboBonus    = 5
 )
 
 // The raised fingertip is about 11% of the way across ebisan.png.
@@ -66,8 +71,13 @@ type point struct {
 }
 
 type ufo struct {
-	point
+	horizontalEnemy
 	visible bool
+}
+
+type horizontalEnemy struct {
+	point
+	velocityX float64
 }
 
 type boss struct {
@@ -76,6 +86,7 @@ type boss struct {
 	maxHP          int
 	direction      float64
 	attackCooldown int
+	moveCooldown   int
 }
 
 type Game struct {
@@ -85,7 +96,7 @@ type Game struct {
 	projectiles []point
 	ufos        []ufo
 	bashiHebis  []point
-	ebis        []point
+	ebis        []horizontalEnemy
 	boss        *boss
 	debug       bool
 
@@ -393,6 +404,46 @@ func bossHealthForWave(wave int) int {
 	return bossBaseHP + max(0, wave/bossWaveCycle-1)*bossHPGrowth
 }
 
+func enemySpeedForWave(wave int) float64 {
+	return min(float64(maxEnemySpeed), float64(enemySpeed)+float64(max(0, wave-1))*enemySpeedGain)
+}
+
+func newHorizontalEnemy(imageWidth int, y, speed float64, fromLeft bool) horizontalEnemy {
+	if fromLeft {
+		return horizontalEnemy{point: point{x: -float64(imageWidth), y: y}, velocityX: speed}
+	}
+	return horizontalEnemy{point: point{x: screenWidth, y: y}, velocityX: -speed}
+}
+
+func horizontalEnemyOffscreen(enemy horizontalEnemy, imageWidth int) bool {
+	return enemy.x+float64(imageWidth) < 0 || enemy.x > screenWidth
+}
+
+func horizontalSpawnSide(velocity float64) string {
+	if velocity > 0 {
+		return "left"
+	}
+	return "right"
+}
+
+func horizontalMovementDirection(velocity float64) string {
+	if velocity > 0 {
+		return "right"
+	}
+	return "left"
+}
+
+func randomHorizontalDirection(random *rand.Rand) float64 {
+	if random.Intn(2) == 0 {
+		return -1
+	}
+	return 1
+}
+
+func (g *Game) randomBossMoveTime() int {
+	return bossMoveMinTime + g.random.Intn(bossMoveVariance+1)
+}
+
 func (g *Game) updateWave() {
 	if g.waveBannerTicks > 0 {
 		g.waveBannerTicks--
@@ -423,11 +474,12 @@ func (g *Game) startWave(wave int) {
 	hp := bossHealthForWave(wave)
 	bossWidth := float64(g.bossImage.Bounds().Dx()) * bossScale
 	g.boss = &boss{
-		point:          point{x: (screenWidth - bossWidth) / 2, y: 28},
+		point:          point{x: (screenWidth - bossWidth) / 2, y: bossY},
 		hp:             hp,
 		maxHP:          hp,
-		direction:      1,
+		direction:      randomHorizontalDirection(g.random),
 		attackCooldown: bossAttackTime,
+		moveCooldown:   g.randomBossMoveTime(),
 	}
 }
 
@@ -540,10 +592,19 @@ func (g *Game) spawnEnemies() {
 
 	ufoChance := min(6, 2+g.wave/2)
 	if g.random.Intn(120) < ufoChance {
+		movement := newHorizontalEnemy(
+			g.ufoImage.Bounds().Dx(),
+			float64(g.random.Intn(screenHeight/2)),
+			enemySpeedForWave(g.wave),
+			g.random.Intn(2) == 0,
+		)
 		g.ufos = append(g.ufos, ufo{
-			point:   point{x: screenWidth, y: float64(g.random.Intn(screenHeight / 2))},
-			visible: true,
+			horizontalEnemy: movement,
+			visible:         true,
 		})
+		if g.debug {
+			log.Printf("debug: spawned UFO from %s (wave=%d speed=%.2f)", horizontalSpawnSide(movement.velocityX), g.wave, enemySpeedForWave(g.wave))
+		}
 	}
 
 	fallingEnemyChance := min(7, 1+g.wave/2)
@@ -552,13 +613,30 @@ func (g *Game) spawnEnemies() {
 	}
 
 	if g.random.Intn(130) < 1 {
-		g.ebis = append(g.ebis, point{x: screenWidth, y: float64(g.random.Intn(screenHeight / 2))})
+		movement := newHorizontalEnemy(
+			g.ebiImage.Bounds().Dx(),
+			float64(g.random.Intn(screenHeight/2)),
+			enemySpeedForWave(g.wave),
+			g.random.Intn(2) == 0,
+		)
+		g.ebis = append(g.ebis, movement)
+		if g.debug {
+			log.Printf("debug: spawned shrimp from %s (wave=%d speed=%.2f)", horizontalSpawnSide(movement.velocityX), g.wave, enemySpeedForWave(g.wave))
+		}
 	}
 }
 
 func (g *Game) moveEntities() {
 	if g.boss != nil {
 		bossWidth := float64(g.bossImage.Bounds().Dx()) * bossScale
+		g.boss.moveCooldown--
+		if g.boss.moveCooldown <= 0 {
+			g.boss.direction = randomHorizontalDirection(g.random)
+			g.boss.moveCooldown = g.randomBossMoveTime()
+			if g.debug {
+				log.Printf("debug: boss moving %s for %d ticks", horizontalMovementDirection(g.boss.direction), g.boss.moveCooldown)
+			}
+		}
 		g.boss.x += bossSpeed * g.boss.direction
 		if g.boss.x <= 0 {
 			g.boss.x = 0
@@ -569,14 +647,14 @@ func (g *Game) moveEntities() {
 		}
 	}
 	for index := range g.ufos {
-		g.ufos[index].x -= enemySpeed
+		g.ufos[index].x += g.ufos[index].velocityX
 	}
 	fallingEnemySpeed := 1 + float64(g.wave-1)*0.15
 	for index := range g.bashiHebis {
 		g.bashiHebis[index].y += fallingEnemySpeed
 	}
 	for index := range g.ebis {
-		g.ebis[index].x -= enemySpeed
+		g.ebis[index].x += g.ebis[index].velocityX
 	}
 	for index := range g.projectiles {
 		g.projectiles[index].y -= projectileSpeed
@@ -642,13 +720,13 @@ func (g *Game) removeOffscreenEntities() {
 
 	for index := len(g.ufos) - 1; index >= 0; index-- {
 		target := g.ufos[index]
-		if !target.visible || target.x+float64(g.ufoImage.Bounds().Dx()) < 0 {
+		if !target.visible || horizontalEnemyOffscreen(target.horizontalEnemy, g.ufoImage.Bounds().Dx()) {
 			g.ufos = removeAt(g.ufos, index)
 		}
 	}
 
 	for index := len(g.ebis) - 1; index >= 0; index-- {
-		if g.ebis[index].x+float64(g.ebiImage.Bounds().Dx()) < 0 {
+		if horizontalEnemyOffscreen(g.ebis[index], g.ebiImage.Bounds().Dx()) {
 			g.ebis = removeAt(g.ebis, index)
 		}
 	}
@@ -701,7 +779,7 @@ func (g *Game) drawGame(screen *ebiten.Image) {
 		drawImageAt(screen, g.bashiHebiImg, enemy)
 	}
 	for _, target := range g.ebis {
-		drawImageAt(screen, g.ebiImage, target)
+		drawImageAt(screen, g.ebiImage, target.point)
 	}
 	if g.boss != nil {
 		bossOptions := &ebiten.DrawImageOptions{}

@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"math/rand"
+	"testing"
+)
 
 func TestShouldFireWhileSpaceIsHeld(t *testing.T) {
 	game := &Game{}
@@ -91,5 +94,57 @@ func TestDebugModeEnabledFromEnvironment(t *testing.T) {
 	t.Setenv("MYGAME_DEBUG", "0")
 	if debugModeEnabled() {
 		t.Fatal("debug mode should be disabled unless MYGAME_DEBUG=1")
+	}
+}
+
+func TestHorizontalEnemySpawnsFromBothSides(t *testing.T) {
+	const (
+		imageWidth = 32
+		y          = 80
+		speed      = 3.5
+	)
+
+	fromLeft := newHorizontalEnemy(imageWidth, y, speed, true)
+	if fromLeft.x != -imageWidth || fromLeft.velocityX != speed {
+		t.Fatalf("left spawn = %+v, want x=%d velocity=%v", fromLeft, -imageWidth, speed)
+	}
+
+	fromRight := newHorizontalEnemy(imageWidth, y, speed, false)
+	if fromRight.x != screenWidth || fromRight.velocityX != -speed {
+		t.Fatalf("right spawn = %+v, want x=%d velocity=%v", fromRight, screenWidth, -speed)
+	}
+}
+
+func TestEnemySpeedIncreasesByWaveAndIsCapped(t *testing.T) {
+	if got := enemySpeedForWave(1); got != enemySpeed {
+		t.Fatalf("wave 1 speed = %v, want %v", got, enemySpeed)
+	}
+	if enemySpeedForWave(2) <= enemySpeedForWave(1) {
+		t.Fatal("enemy speed did not increase at wave 2")
+	}
+	if got := enemySpeedForWave(100); got != maxEnemySpeed {
+		t.Fatalf("capped speed = %v, want %v", got, maxEnemySpeed)
+	}
+}
+
+func TestBossMovementUsesBothDirectionsAndBoundedTiming(t *testing.T) {
+	random := rand.New(rand.NewSource(1))
+	seenLeft := false
+	seenRight := false
+	for range 100 {
+		direction := randomHorizontalDirection(random)
+		seenLeft = seenLeft || direction < 0
+		seenRight = seenRight || direction > 0
+	}
+	if !seenLeft || !seenRight {
+		t.Fatalf("random boss movement directions: left=%t right=%t", seenLeft, seenRight)
+	}
+
+	game := &Game{random: rand.New(rand.NewSource(2))}
+	for range 100 {
+		duration := game.randomBossMoveTime()
+		if duration < bossMoveMinTime || duration > bossMoveMinTime+bossMoveVariance {
+			t.Fatalf("boss movement duration %d is outside the configured range", duration)
+		}
 	}
 }
