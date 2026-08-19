@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>ゲーム</title>
+    <style>
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+        background: #000;
+      }
+
+      #status {
+        position: fixed;
+        inset: 0;
+        z-index: 1;
+        display: grid;
+        place-items: center;
+        margin: 0;
+        padding: 1rem;
+        color: #f5f7ff;
+        font-family: system-ui, sans-serif;
+        text-align: center;
+        background: #000;
+      }
+    </style>
+  </head>
+  <body>
+    <p id="status" role="status">ゲームを読み込んでいます…</p>
+    <script src="wasm_exec.js"></script>
+    <script>
+      const status = document.querySelector("#status");
+
+      async function instantiateGame(go) {
+        const response = await fetch("mygame.wasm");
+        if (!response.ok) {
+          throw new Error(`WASMの取得に失敗しました (${response.status})`);
+        }
+
+        if (WebAssembly.instantiateStreaming) {
+          try {
+            return await WebAssembly.instantiateStreaming(response.clone(), go.importObject);
+          } catch (error) {
+            console.warn("Streaming compile failed; falling back to ArrayBuffer", error);
+          }
+        }
+
+        const bytes = await response.arrayBuffer();
+        return WebAssembly.instantiate(bytes, go.importObject);
+      }
+
+      async function startGame() {
+        try {
+          const go = new Go();
+          const result = await instantiateGame(go);
+          status.remove();
+          await go.run(result.instance);
+        } catch (error) {
+          console.error(error);
+          status.textContent = `ゲームを起動できませんでした: ${error.message}`;
+        }
+      }
+
+      startGame();
+    </script>
+  </body>
+</html>
