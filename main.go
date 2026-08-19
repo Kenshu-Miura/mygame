@@ -34,6 +34,7 @@ const (
 	enemySpeed      = 2
 	audioSampleRate = 48_000
 	specialCost     = 20
+	shotInterval    = 10 // At 60 TPS, holding Space fires about six shots per second.
 )
 
 // The raised fingertip is about 11% of the way across ebisan.png.
@@ -68,6 +69,7 @@ type Game struct {
 
 	score          int
 	missCount      int
+	shotCooldown   int
 	bashiHebiSpeed float64
 	spawnThreshold float64
 	random         *rand.Rand
@@ -250,6 +252,7 @@ func (g *Game) reset() {
 	g.ebis = nil
 	g.score = 0
 	g.missCount = 0
+	g.shotCooldown = 0
 	g.bashiHebiSpeed = 1
 	g.spawnThreshold = 0.001
 	g.random = rand.New(rand.NewSource(time.Now().UnixNano()))
@@ -296,7 +299,7 @@ func (g *Game) handlePlayerInput() {
 	if ebiten.IsKeyPressed(ebiten.KeyRight) {
 		g.player.x = min(float64(screenWidth)-playerWidth, g.player.x+playerSpeed)
 	}
-	if inpututil.IsKeyJustPressed(ebiten.KeySpace) {
+	if g.shouldFire(ebiten.IsKeyPressed(ebiten.KeySpace)) {
 		projectileWidth := float64(g.projectileImg.Bounds().Dx())
 		g.projectiles = append(g.projectiles, point{
 			x: g.player.x + playerWidth*playerFingerTipXRatio - projectileWidth/2,
@@ -304,6 +307,19 @@ func (g *Game) handlePlayerInput() {
 		})
 		replay(g.shotSound)
 	}
+}
+
+func (g *Game) shouldFire(spacePressed bool) bool {
+	if !spacePressed {
+		g.shotCooldown = 0
+		return false
+	}
+	if g.shotCooldown > 0 {
+		g.shotCooldown--
+		return false
+	}
+	g.shotCooldown = shotInterval - 1
+	return true
 }
 
 func (g *Game) handleProjectileCollisions() {
