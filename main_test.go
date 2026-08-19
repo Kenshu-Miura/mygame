@@ -274,6 +274,58 @@ func TestDiagonalProjectilesAreRemovedOutsideHorizontalBounds(t *testing.T) {
 	}
 }
 
+func TestTouchGestureActions(t *testing.T) {
+	tests := []struct {
+		name     string
+		points   []point
+		want     touchAction
+		wantMove bool
+	}{
+		{
+			name:   "tap shoots",
+			points: []point{{x: 100, y: 300}, {x: 106, y: 304}},
+			want:   touchActionShot,
+		},
+		{
+			name:     "horizontal slide only moves",
+			points:   []point{{x: 100, y: 300}, {x: 180, y: 305}},
+			want:     touchActionNone,
+			wantMove: true,
+		},
+		{
+			name:   "upward swipe uses special",
+			points: []point{{x: 100, y: 300}, {x: 108, y: 220}},
+			want:   touchActionSpecial,
+		},
+		{
+			name:   "moving away and back is not a tap",
+			points: []point{{x: 100, y: 300}, {x: 150, y: 300}, {x: 100, y: 300}},
+			want:   touchActionNone,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			gesture := touchGesture{}
+			first := test.points[0]
+			gesture.begin(1, int(first.x), int(first.y))
+			totalMove := 0
+			for _, position := range test.points[1 : len(test.points)-1] {
+				totalMove += intAbs(gesture.track(int(position.x), int(position.y)))
+			}
+			last := test.points[len(test.points)-1]
+			deltaX, action := gesture.finish(int(last.x), int(last.y))
+			totalMove += intAbs(deltaX)
+			if action != test.want {
+				t.Fatalf("action = %d, want %d", action, test.want)
+			}
+			if test.wantMove && totalMove == 0 {
+				t.Fatalf("horizontal movement = %d, want movement", totalMove)
+			}
+		})
+	}
+}
+
 func TestPowerUpDropUsesConfiguredRate(t *testing.T) {
 	game := &Game{random: rand.New(rand.NewSource(1))}
 	for range powerUpDropRate * 20 {

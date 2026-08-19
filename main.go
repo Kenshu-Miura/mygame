@@ -62,6 +62,8 @@ const (
 	fallingSpeedBase     = 1.2
 	fallingSpeedGain     = 0.25
 	maxFallingSpeed      = 5
+	touchTapDistance     = 14
+	touchSpecialDistance = 60
 )
 
 // The raised fingertip is about 11% of the way across ebisan.png.
@@ -131,6 +133,9 @@ type Game struct {
 	ufoKills        int
 	waveBannerTicks int
 	random          *rand.Rand
+	touch           touchGesture
+	touchShot       bool
+	touchSpecial    bool
 
 	playerImage   *ebiten.Image
 	backgroundImg *ebiten.Image
@@ -341,6 +346,9 @@ func (g *Game) reset() {
 	g.wave = 1
 	g.ufoKills = 0
 	g.waveBannerTicks = waveBannerTime
+	g.touch = touchGesture{}
+	g.touchShot = false
+	g.touchSpecial = false
 	g.random = rand.New(rand.NewSource(time.Now().UnixNano()))
 	g.state = stateTitle
 	g.bgm.Pause()
@@ -350,13 +358,13 @@ func (g *Game) reset() {
 func (g *Game) Update() error {
 	switch g.state {
 	case stateTitle:
-		if inpututil.IsKeyJustPressed(ebiten.KeySpace) {
+		if inpututil.IsKeyJustPressed(ebiten.KeySpace) || touchJustPressed() {
 			g.state = statePlaying
 			replay(g.bgm)
 		}
 		return nil
 	case stateGameOver:
-		if inpututil.IsKeyJustPressed(ebiten.KeyEscape) {
+		if inpututil.IsKeyJustPressed(ebiten.KeyEscape) || touchJustPressed() {
 			g.reset()
 		}
 		return nil
@@ -367,6 +375,7 @@ func (g *Game) Update() error {
 		return nil
 	}
 
+	g.handleTouchInput()
 	g.handleDebugInput()
 	g.updateWave()
 	g.handlePlayerInput()
@@ -406,19 +415,30 @@ func (g *Game) handleDebugInput() {
 }
 
 func (g *Game) handlePlayerInput() {
-	playerWidth := float64(g.playerImage.Bounds().Dx()) * playerScale
 	if ebiten.IsKeyPressed(ebiten.KeyLeft) {
-		g.player.x = max(0, g.player.x-playerSpeed)
+		g.movePlayerHorizontally(-playerSpeed)
 	}
 	if ebiten.IsKeyPressed(ebiten.KeyRight) {
-		g.player.x = min(float64(screenWidth)-playerWidth, g.player.x+playerSpeed)
+		g.movePlayerHorizontally(playerSpeed)
 	}
-	if g.shouldFire(ebiten.IsKeyPressed(ebiten.KeySpace)) {
-		projectileWidth := float64(g.projectileImg.Bounds().Dx())
-		shotX := g.player.x + playerWidth*playerFingerTipXRatio - projectileWidth/2
-		g.fireProjectiles(shotX, g.player.y)
-		replay(g.shotSound)
+	fire := g.shouldFire(ebiten.IsKeyPressed(ebiten.KeySpace)) || g.touchShot
+	g.touchShot = false
+	if fire {
+		g.firePlayerShot()
 	}
+}
+
+func (g *Game) firePlayerShot() {
+	playerWidth := float64(g.playerImage.Bounds().Dx()) * playerScale
+	projectileWidth := float64(g.projectileImg.Bounds().Dx())
+	shotX := g.player.x + playerWidth*playerFingerTipXRatio - projectileWidth/2
+	g.fireProjectiles(shotX, g.player.y)
+	replay(g.shotSound)
+}
+
+func (g *Game) movePlayerHorizontally(distance float64) {
+	playerWidth := float64(g.playerImage.Bounds().Dx()) * playerScale
+	g.player.x = min(float64(screenWidth)-playerWidth, max(0, g.player.x+distance))
 }
 
 func (g *Game) fireProjectiles(x, y float64) {
@@ -653,7 +673,9 @@ func (g *Game) maybeDropPowerUp(position point) {
 }
 
 func (g *Game) handleSpecialAttack() {
-	if g.missCount < specialCost || !inpututil.IsKeyJustPressed(ebiten.KeyArrowUp) {
+	requested := inpututil.IsKeyJustPressed(ebiten.KeyArrowUp) || g.touchSpecial
+	g.touchSpecial = false
+	if g.missCount < specialCost || !requested {
 		return
 	}
 
@@ -897,7 +919,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	case stateGameOver:
 		g.drawGame(screen)
 		g.drawCenteredText(screen, "GAME OVER", screenHeight/2, color.White)
-		g.drawCenteredText(screen, "Escキーでタイトルに戻る", screenHeight/2+40, color.White)
+		g.drawCenteredText(screen, "Escキーまたはタップでタイトルに戻る", screenHeight/2+40, color.White)
 		return
 	default:
 		g.drawGame(screen)
@@ -910,8 +932,9 @@ func (g *Game) drawTitle(screen *ebiten.Image) {
 	g.drawCenteredText(screen, "UFO撃破ノルマ達成で次のウェーブへ", screenHeight/2+46, color.White)
 	g.drawCenteredText(screen, "連続命中でコンボ倍率アップ", screenHeight/2+86, color.White)
 	g.drawCenteredText(screen, fmt.Sprintf("HIGH SCORE: %d", g.highScore), screenHeight/2+126, color.RGBA{R: 255, G: 220, B: 70, A: 255})
+	g.drawCenteredText(screen, "スマホ: タップ発射 / 横スライド移動 / 上スワイプ必殺", screenHeight/2+158, color.RGBA{R: 130, G: 220, B: 255, A: 255})
 	if g.debug {
-		g.drawCenteredText(screen, "DEBUG MODE: 無敵 / B:ボス / K:KIEE / P:強化", screenHeight/2+158, color.RGBA{R: 255, G: 210, B: 60, A: 255})
+		g.drawCenteredText(screen, "DEBUG MODE: 無敵 / B:ボス / K:KIEE / P:強化", screenHeight/2+190, color.RGBA{R: 255, G: 210, B: 60, A: 255})
 	}
 }
 

@@ -45,6 +45,7 @@
         border: 1px solid #59678f;
         border-radius: 0.75rem;
         box-shadow: 0 1rem 3rem rgb(0 0 0 / 45%);
+        touch-action: none;
       }
 
       iframe {
@@ -52,6 +53,7 @@
         width: 100%;
         height: 100%;
         border: 0;
+        touch-action: none;
       }
 
       .controls {
@@ -67,7 +69,7 @@
       <div class="game-frame">
         <iframe id="game" title="UFOシューティングゲーム" allow="autoplay" scrolling="no"></iframe>
       </div>
-      <p class="controls">← →: 移動 / Space: 発射・スタート / ↑: 必殺技 / Esc: リスタート</p>
+      <p class="controls">PC: ← → 移動 / Space 発射・スタート / ↑ 必殺技 / Esc リスタート<br>スマホ: タップ 発射・スタート / 横スライド 移動 / 上スワイプ 必殺技</p>
     </main>
     <script>
       const gameFrame = document.querySelector("#game");
