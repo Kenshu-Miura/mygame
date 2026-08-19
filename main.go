@@ -25,43 +25,43 @@ import (
 )
 
 const (
-	screenWidth      = 640
-	screenHeight     = 480
-	windowScale      = 2
-	playerScale      = 0.1
-	playerSpeed      = 4
-	projectileSpeed  = 2
-	enemySpeed       = 2
-	enemySpeedGain   = 0.25
-	maxEnemySpeed    = 6
-	audioSampleRate  = 48_000
-	specialCost      = 20
-	shotInterval     = 10 // At 60 TPS, holding Space fires about six shots per second.
-	bossWaveCycle    = 5
-	waveBannerTime   = 90
-	ufoBaseTarget    = 5
-	ufoMaxTarget     = 20
-	bossScale        = 0.22
-	bossSpeed        = 1.5
-	bossY            = -18
-	bossMoveMinTime  = 30
-	bossMoveVariance = 90
-	bossBaseHP       = 30
-	bossHPGrowth     = 15
-	bossAttackTime   = 75
-	bossSpecialHit   = 10
-	bossDefeatBonus  = 25
-	comboStep        = 5
-	maxComboBonus    = 5
-	powerUpSize      = 20
-	powerUpSpeed     = 1.5
-	powerUpDropRate  = 5 // One in five defeated UFOs drops an item.
-	powerUpDuration  = 10 * 60
-	powerUpShotCount = 3
-	powerUpShotGap   = 12
-	fallingSpeedBase = 1.2
-	fallingSpeedGain = 0.25
-	maxFallingSpeed  = 5
+	screenWidth          = 640
+	screenHeight         = 480
+	windowScale          = 2
+	playerScale          = 0.1
+	playerSpeed          = 4
+	projectileSpeed      = 2
+	enemySpeed           = 2
+	enemySpeedGain       = 0.25
+	maxEnemySpeed        = 6
+	audioSampleRate      = 48_000
+	specialCost          = 20
+	shotInterval         = 10 // At 60 TPS, holding Space fires about six shots per second.
+	bossWaveCycle        = 5
+	waveBannerTime       = 90
+	ufoBaseTarget        = 5
+	ufoMaxTarget         = 20
+	bossScale            = 0.22
+	bossSpeed            = 1.5
+	bossY                = -18
+	bossMoveMinTime      = 30
+	bossMoveVariance     = 90
+	bossBaseHP           = 30
+	bossHPGrowth         = 15
+	bossAttackTime       = 75
+	bossSpecialHit       = 10
+	bossDefeatBonus      = 25
+	comboStep            = 5
+	maxComboBonus        = 5
+	powerUpSize          = 20
+	powerUpSpeed         = 1.5
+	powerUpDropRate      = 5 // One in five defeated UFOs drops an item.
+	powerUpDuration      = 10 * 60
+	powerUpShotCount     = 3
+	powerUpDiagonalSpeed = 1.4
+	fallingSpeedBase     = 1.2
+	fallingSpeedGain     = 0.25
+	maxFallingSpeed      = 5
 )
 
 // The raised fingertip is about 11% of the way across ebisan.png.
@@ -78,6 +78,12 @@ const (
 type point struct {
 	x float64
 	y float64
+}
+
+type projectile struct {
+	point
+	velocityX float64
+	velocityY float64
 }
 
 type ufo struct {
@@ -107,7 +113,7 @@ type Game struct {
 	player point
 	state  gameState
 
-	projectiles []point
+	projectiles []projectile
 	ufos        []ufo
 	bashiHebis  []point
 	ebis        []horizontalEnemy
@@ -410,13 +416,16 @@ func (g *Game) handlePlayerInput() {
 }
 
 func (g *Game) fireProjectiles(x, y float64) {
-	g.projectiles = append(g.projectiles, point{x: x, y: y})
+	g.projectiles = append(g.projectiles, projectile{
+		point:     point{x: x, y: y},
+		velocityY: -projectileSpeed,
+	})
 	if g.powerUpTicks <= 0 {
 		return
 	}
 	g.projectiles = append(g.projectiles,
-		point{x: x - powerUpShotGap, y: y + 4},
-		point{x: x + powerUpShotGap, y: y + 4},
+		projectile{point: point{x: x, y: y}, velocityX: -powerUpDiagonalSpeed, velocityY: -powerUpDiagonalSpeed},
+		projectile{point: point{x: x, y: y}, velocityX: powerUpDiagonalSpeed, velocityY: -powerUpDiagonalSpeed},
 	)
 }
 
@@ -757,7 +766,8 @@ func (g *Game) moveEntities() {
 		g.ebis[index].x += g.ebis[index].velocityX
 	}
 	for index := range g.projectiles {
-		g.projectiles[index].y -= projectileSpeed
+		g.projectiles[index].x += g.projectiles[index].velocityX
+		g.projectiles[index].y += g.projectiles[index].velocityY
 	}
 	for index := range g.powerUps {
 		g.powerUps[index].y += powerUpSpeed
@@ -839,7 +849,7 @@ func (g *Game) removeOffscreenEntities() {
 	}
 
 	for index := len(g.projectiles) - 1; index >= 0; index-- {
-		if g.projectiles[index].y+float64(g.projectileImg.Bounds().Dy()) < 0 {
+		if projectileOffscreen(g.projectiles[index], g.projectileImg.Bounds().Dx(), g.projectileImg.Bounds().Dy()) {
 			g.missCount++
 			g.projectiles = removeAt(g.projectiles, index)
 		}
@@ -922,7 +932,7 @@ func (g *Game) drawGame(screen *ebiten.Image) {
 		screen.DrawImage(g.bossImage, bossOptions)
 	}
 	for _, projectile := range g.projectiles {
-		drawImageAt(screen, g.projectileImg, projectile)
+		drawImageAt(screen, g.projectileImg, projectile.point)
 	}
 	for _, item := range g.powerUps {
 		g.drawPowerUp(screen, item)
@@ -936,6 +946,12 @@ func (g *Game) drawGame(screen *ebiten.Image) {
 		}
 		g.drawCenteredText(screen, message, 110, color.White)
 	}
+}
+
+func projectileOffscreen(projectile projectile, width, height int) bool {
+	return projectile.y+float64(height) < 0 ||
+		projectile.x+float64(width) < 0 ||
+		projectile.x > screenWidth
 }
 
 func (g *Game) drawHUD(screen *ebiten.Image) {

@@ -237,13 +237,40 @@ func TestPowerUpCreatesThreeShotsAndExpires(t *testing.T) {
 	if len(game.projectiles) != powerUpShotCount {
 		t.Fatalf("powered shot count = %d, want %d", len(game.projectiles), powerUpShotCount)
 	}
-	if game.projectiles[0].x != 100 || game.projectiles[1].x != 100-powerUpShotGap || game.projectiles[2].x != 100+powerUpShotGap {
-		t.Fatalf("powered shot positions = %+v", game.projectiles)
+	center := game.projectiles[0]
+	left := game.projectiles[1]
+	right := game.projectiles[2]
+	if center.velocityX != 0 || center.velocityY != -projectileSpeed {
+		t.Fatalf("center shot velocity = (%.1f, %.1f)", center.velocityX, center.velocityY)
+	}
+	if left.velocityX != -powerUpDiagonalSpeed || left.velocityY != -powerUpDiagonalSpeed {
+		t.Fatalf("left shot velocity = (%.1f, %.1f)", left.velocityX, left.velocityY)
+	}
+	if right.velocityX != powerUpDiagonalSpeed || right.velocityY != -powerUpDiagonalSpeed {
+		t.Fatalf("right shot velocity = (%.1f, %.1f)", right.velocityX, right.velocityY)
+	}
+	game.moveEntities()
+	if !(left.x > game.projectiles[1].x && right.x < game.projectiles[2].x) {
+		t.Fatalf("diagonal shots did not spread: left=%+v right=%+v", game.projectiles[1], game.projectiles[2])
 	}
 	game.powerUpTicks = 1
 	game.moveEntities()
 	if game.powerUpTicks != 0 {
 		t.Fatalf("expired power-up ticks = %d, want 0", game.powerUpTicks)
+	}
+}
+
+func TestDiagonalProjectilesAreRemovedOutsideHorizontalBounds(t *testing.T) {
+	imageWidth := 8
+	imageHeight := 8
+	if !projectileOffscreen(projectile{point: point{x: -9, y: 100}}, imageWidth, imageHeight) {
+		t.Fatal("projectile beyond the left edge should be offscreen")
+	}
+	if !projectileOffscreen(projectile{point: point{x: screenWidth + 1, y: 100}}, imageWidth, imageHeight) {
+		t.Fatal("projectile beyond the right edge should be offscreen")
+	}
+	if projectileOffscreen(projectile{point: point{x: 0, y: 100}}, imageWidth, imageHeight) {
+		t.Fatal("visible projectile should not be offscreen")
 	}
 }
 
