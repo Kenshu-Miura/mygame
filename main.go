@@ -35,6 +35,18 @@ const (
 	audioSampleRate = 48_000
 	specialCost     = 20
 	shotInterval    = 10 // At 60 TPS, holding Space fires about six shots per second.
+	waveDuration    = 8 * 60
+	bossWaveCycle   = 5
+	waveBannerTime  = 90
+	bossScale       = 0.22
+	bossSpeed       = 1.5
+	bossBaseHP      = 30
+	bossHPGrowth    = 15
+	bossAttackTime  = 75
+	bossSpecialHit  = 10
+	bossDefeatBonus = 25
+	comboStep       = 5
+	maxComboBonus   = 5
 )
 
 // The raised fingertip is about 11% of the way across ebisan.png.
@@ -58,6 +70,14 @@ type ufo struct {
 	visible bool
 }
 
+type boss struct {
+	point
+	hp             int
+	maxHP          int
+	direction      float64
+	attackCooldown int
+}
+
 type Game struct {
 	player point
 	state  gameState
@@ -66,19 +86,24 @@ type Game struct {
 	ufos        []ufo
 	bashiHebis  []point
 	ebis        []point
+	boss        *boss
+	debug       bool
 
-	score          int
-	missCount      int
-	shotCooldown   int
-	bashiHebiSpeed float64
-	spawnThreshold float64
-	random         *rand.Rand
+	score           int
+	combo           int
+	missCount       int
+	shotCooldown    int
+	wave            int
+	waveTicks       int
+	waveBannerTicks int
+	random          *rand.Rand
 
 	playerImage   *ebiten.Image
 	ufoImage      *ebiten.Image
 	projectileImg *ebiten.Image
 	bashiHebiImg  *ebiten.Image
 	ebiImage      *ebiten.Image
+	bossImage     *ebiten.Image
 	font          font.Face
 
 	shotSound  *audio.Player
@@ -116,6 +141,10 @@ func newGame() (*Game, error) {
 	if err != nil {
 		return nil, err
 	}
+	bossImage, err := loadImage("boss_ebi.png")
+	if err != nil {
+		return nil, err
+	}
 
 	audioContext := audio.NewContext(audioSampleRate)
 	shotSound, err := loadWAV(audioContext, "shot.wav")
@@ -148,11 +177,13 @@ func newGame() (*Game, error) {
 	}
 
 	g := &Game{
+		debug:         debugModeEnabled(),
 		playerImage:   playerImage,
 		ufoImage:      ufoImage,
 		projectileImg: projectileImage,
 		bashiHebiImg:  bashiHebiImage,
 		ebiImage:      ebiImage,
+		bossImage:     bossImage,
 		font:          gameFont,
 		shotSound:     shotSound,
 		hitSound:      hitSound,
@@ -250,11 +281,14 @@ func (g *Game) reset() {
 	g.ufos = nil
 	g.bashiHebis = nil
 	g.ebis = nil
+	g.boss = nil
 	g.score = 0
+	g.combo = 0
 	g.missCount = 0
 	g.shotCooldown = 0
-	g.bashiHebiSpeed = 1
-	g.spawnThreshold = 0.001
+	g.wave = 1
+	g.waveTicks = 0
+	g.waveBannerTicks = waveBannerTime
 	g.random = rand.New(rand.NewSource(time.Now().UnixNano()))
 	g.state = stateTitle
 	g.bgm.Pause()
@@ -281,6 +315,8 @@ func (g *Game) Update() error {
 		return nil
 	}
 
+	g.handleDebugInput()
+	g.updateWave()
 	g.handlePlayerInput()
 	g.handleProjectileCollisions()
 	g.handleSpecialAttack()
@@ -289,6 +325,24 @@ func (g *Game) Update() error {
 	g.handlePlayerCollision()
 	g.removeOffscreenEntities()
 	return nil
+}
+
+func (g *Game) handleDebugInput() {
+	if !g.debug {
+		return
+	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyB) {
+		nextBossWave := (g.wave/bossWaveCycle + 1) * bossWaveCycle
+		if isBossWave(g.wave) {
+			nextBossWave = g.wave
+		}
+		g.startWave(nextBossWave)
+		log.Printf("debug: jumped to boss wave %d", nextBossWave)
+	}
+	if inpututil.IsKeyJustPressed(ebiten.KeyK) {
+		g.missCount = max(g.missCount, specialCost)
+		log.Printf("debug: filled KIEE gauge to %d", g.missCount)
+	}
 }
 
 func (g *Game) handlePlayerInput() {
@@ -322,13 +376,85 @@ func (g *Game) shouldFire(spacePressed bool) bool {
 	return true
 }
 
+func (g *Game) recordHit(baseScore int) {
+	g.combo++
+	g.score += baseScore * g.comboMultiplier()
+}
+
+func (g *Game) comboMultiplier() int {
+	return min(maxComboBonus, 1+g.combo/comboStep)
+}
+
+func isBossWave(wave int) bool {
+	return wave > 0 && wave%bossWaveCycle == 0
+}
+
+func bossHealthForWave(wave int) int {
+	return bossBaseHP + max(0, wave/bossWaveCycle-1)*bossHPGrowth
+}
+
+func (g *Game) updateWave() {
+	if g.waveBannerTicks > 0 {
+		g.waveBannerTicks--
+	}
+	if g.boss != nil {
+		return
+	}
+	g.waveTicks++
+	if g.waveTicks >= waveDuration {
+		g.startWave(g.wave + 1)
+	}
+}
+
+func (g *Game) startWave(wave int) {
+	g.wave = wave
+	g.waveTicks = 0
+	g.waveBannerTicks = waveBannerTime
+	g.projectiles = nil
+	g.ufos = nil
+	g.bashiHebis = nil
+	g.ebis = nil
+	g.boss = nil
+
+	if !isBossWave(wave) {
+		return
+	}
+
+	hp := bossHealthForWave(wave)
+	bossWidth := float64(g.bossImage.Bounds().Dx()) * bossScale
+	g.boss = &boss{
+		point:          point{x: (screenWidth - bossWidth) / 2, y: 28},
+		hp:             hp,
+		maxHP:          hp,
+		direction:      1,
+		attackCooldown: bossAttackTime,
+	}
+}
+
+func (g *Game) finishBossWave() {
+	g.score += bossDefeatBonus * g.comboMultiplier()
+	g.startWave(g.wave + 1)
+}
+
 func (g *Game) handleProjectileCollisions() {
 	for projectileIndex := len(g.projectiles) - 1; projectileIndex >= 0; projectileIndex-- {
 		projectile := g.projectiles[projectileIndex]
 		projectileRect := g.projectileImg.Bounds().Add(image.Pt(int(projectile.x), int(projectile.y)))
 		hit := false
+		bossDefeated := false
+
+		if g.boss != nil && projectileRect.Overlaps(g.bossRect()) {
+			g.boss.hp--
+			g.recordHit(1)
+			replay(g.hitSound)
+			hit = true
+			bossDefeated = g.boss.hp <= 0
+		}
 
 		for ufoIndex := range g.ufos {
+			if hit {
+				break
+			}
 			target := &g.ufos[ufoIndex]
 			if !target.visible {
 				continue
@@ -336,7 +462,7 @@ func (g *Game) handleProjectileCollisions() {
 			targetRect := g.ufoImage.Bounds().Add(image.Pt(int(target.x), int(target.y)))
 			if projectileRect.Overlaps(targetRect) {
 				target.visible = false
-				g.score++
+				g.recordHit(1)
 				replay(g.hitSound)
 				hit = true
 				break
@@ -350,6 +476,7 @@ func (g *Game) handleProjectileCollisions() {
 				if projectileRect.Overlaps(targetRect) {
 					g.ebis = removeAt(g.ebis, ebiIndex)
 					g.score = max(0, g.score-2)
+					g.combo = 0
 					replay(g.hoaaSound)
 					replay(g.hitSound)
 					hit = true
@@ -361,6 +488,10 @@ func (g *Game) handleProjectileCollisions() {
 		if hit {
 			g.projectiles = removeAt(g.projectiles, projectileIndex)
 		}
+		if bossDefeated {
+			g.finishBossWave()
+			return
+		}
 	}
 }
 
@@ -370,12 +501,23 @@ func (g *Game) handleSpecialAttack() {
 	}
 
 	g.missCount -= specialCost
-	for _, target := range g.ufos {
-		if target.visible && target.x+float64(g.ufoImage.Bounds().Dx()) >= 0 {
-			g.score++
+	if g.boss != nil {
+		damage := min(bossSpecialHit, g.boss.hp)
+		for range damage {
+			g.recordHit(1)
 		}
+		g.boss.hp -= damage
+		if g.boss.hp <= 0 {
+			g.finishBossWave()
+		}
+	} else {
+		for _, target := range g.ufos {
+			if target.visible && target.x+float64(g.ufoImage.Bounds().Dx()) >= 0 {
+				g.recordHit(1)
+			}
+		}
+		g.ufos = nil
 	}
-	g.ufos = nil
 	g.bashiHebis = nil
 	g.ebis = nil
 	g.projectiles = nil
@@ -384,15 +526,28 @@ func (g *Game) handleSpecialAttack() {
 }
 
 func (g *Game) spawnEnemies() {
-	if g.random.Intn(120) < 2 {
+	if g.boss != nil {
+		g.boss.attackCooldown--
+		if g.boss.attackCooldown <= 0 {
+			bossWidth := float64(g.bossImage.Bounds().Dx()) * bossScale
+			attackX := g.boss.x + bossWidth/2 - float64(g.bashiHebiImg.Bounds().Dx())/2
+			attackY := g.boss.y + float64(g.bossImage.Bounds().Dy())*bossScale*0.7
+			g.bashiHebis = append(g.bashiHebis, point{x: attackX, y: attackY})
+			g.boss.attackCooldown = bossAttackTime
+		}
+		return
+	}
+
+	ufoChance := min(6, 2+g.wave/2)
+	if g.random.Intn(120) < ufoChance {
 		g.ufos = append(g.ufos, ufo{
 			point:   point{x: screenWidth, y: float64(g.random.Intn(screenHeight / 2))},
 			visible: true,
 		})
 	}
 
-	g.spawnThreshold += 0.0005
-	if g.random.Intn(165) < int(g.spawnThreshold) {
+	fallingEnemyChance := min(7, 1+g.wave/2)
+	if g.random.Intn(165) < fallingEnemyChance {
 		g.bashiHebis = append(g.bashiHebis, point{x: float64(g.random.Intn(screenWidth)), y: 0})
 	}
 
@@ -402,12 +557,23 @@ func (g *Game) spawnEnemies() {
 }
 
 func (g *Game) moveEntities() {
-	g.bashiHebiSpeed += 0.001
+	if g.boss != nil {
+		bossWidth := float64(g.bossImage.Bounds().Dx()) * bossScale
+		g.boss.x += bossSpeed * g.boss.direction
+		if g.boss.x <= 0 {
+			g.boss.x = 0
+			g.boss.direction = 1
+		} else if g.boss.x+bossWidth >= screenWidth {
+			g.boss.x = screenWidth - bossWidth
+			g.boss.direction = -1
+		}
+	}
 	for index := range g.ufos {
 		g.ufos[index].x -= enemySpeed
 	}
+	fallingEnemySpeed := 1 + float64(g.wave-1)*0.15
 	for index := range g.bashiHebis {
-		g.bashiHebis[index].y += g.bashiHebiSpeed
+		g.bashiHebis[index].y += fallingEnemySpeed
 	}
 	for index := range g.ebis {
 		g.ebis[index].x -= enemySpeed
@@ -415,6 +581,21 @@ func (g *Game) moveEntities() {
 	for index := range g.projectiles {
 		g.projectiles[index].y -= projectileSpeed
 	}
+}
+
+func (g *Game) bossRect() image.Rectangle {
+	if g.boss == nil {
+		return image.Rectangle{}
+	}
+	const padding = 18
+	width := int(float64(g.bossImage.Bounds().Dx()) * bossScale)
+	height := int(float64(g.bossImage.Bounds().Dy()) * bossScale)
+	return image.Rect(
+		int(g.boss.x)+padding,
+		int(g.boss.y)+padding,
+		int(g.boss.x)+width-padding,
+		int(g.boss.y)+height-padding,
+	)
 }
 
 func (g *Game) handlePlayerCollision() {
@@ -426,9 +607,17 @@ func (g *Game) handlePlayerCollision() {
 		int(g.player.y)+int(float64(g.playerImage.Bounds().Dy())*playerScale)-padding,
 	)
 
-	for _, enemy := range g.bashiHebis {
+	for index := len(g.bashiHebis) - 1; index >= 0; index-- {
+		enemy := g.bashiHebis[index]
 		enemyRect := g.bashiHebiImg.Bounds().Add(image.Pt(int(enemy.x), int(enemy.y)))
 		if enemyRect.Overlaps(playerRect) {
+			if g.debug {
+				log.Printf("debug: collision ignored (wave=%d score=%d combo=%d player=(%.1f,%.1f) enemy=(%.1f,%.1f))", g.wave, g.score, g.combo, g.player.x, g.player.y, enemy.x, enemy.y)
+				g.bashiHebis = removeAt(g.bashiHebis, index)
+				continue
+			}
+			log.Printf("game over: player collided with enemy (wave=%d score=%d combo=%d player=(%.1f,%.1f) enemy=(%.1f,%.1f))", g.wave, g.score, g.combo, g.player.x, g.player.y, enemy.x, enemy.y)
+			g.combo = 0
 			g.state = stateGameOver
 			g.bgm.Pause()
 			replay(g.gameOverSE)
@@ -490,7 +679,11 @@ func (g *Game) Draw(screen *ebiten.Image) {
 func (g *Game) drawTitle(screen *ebiten.Image) {
 	g.drawCenteredText(screen, "UFO撃ち落としたことありますか？", screenHeight/2-34, color.White)
 	g.drawCenteredText(screen, "Spaceキーでスタート", screenHeight/2+6, color.White)
-	g.drawCenteredText(screen, "KIEE Countが20以上の時に↑を押すと…", screenHeight/2+46, color.White)
+	g.drawCenteredText(screen, "5ウェーブごとに巨大海老ボス出現！", screenHeight/2+46, color.White)
+	g.drawCenteredText(screen, "連続命中でコンボ倍率アップ", screenHeight/2+86, color.White)
+	if g.debug {
+		g.drawCenteredText(screen, "DEBUG MODE: 無敵 / B:ボス / K:KIEE", screenHeight/2+126, color.RGBA{R: 255, G: 210, B: 60, A: 255})
+	}
 }
 
 func (g *Game) drawGame(screen *ebiten.Image) {
@@ -499,10 +692,6 @@ func (g *Game) drawGame(screen *ebiten.Image) {
 	playerOptions.GeoM.Translate(g.player.x, g.player.y)
 	screen.DrawImage(g.playerImage, playerOptions)
 
-	ebitenutil.DebugPrint(screen, fmt.Sprintf("Score: %d", g.score))
-	for _, projectile := range g.projectiles {
-		drawImageAt(screen, g.projectileImg, projectile)
-	}
 	for _, target := range g.ufos {
 		if target.visible {
 			drawImageAt(screen, g.ufoImage, target.point)
@@ -514,8 +703,48 @@ func (g *Game) drawGame(screen *ebiten.Image) {
 	for _, target := range g.ebis {
 		drawImageAt(screen, g.ebiImage, target)
 	}
+	if g.boss != nil {
+		bossOptions := &ebiten.DrawImageOptions{}
+		bossOptions.GeoM.Scale(bossScale, bossScale)
+		bossOptions.GeoM.Translate(g.boss.x, g.boss.y)
+		screen.DrawImage(g.bossImage, bossOptions)
+	}
+	for _, projectile := range g.projectiles {
+		drawImageAt(screen, g.projectileImg, projectile)
+	}
 
-	text.Draw(screen, fmt.Sprintf("KIEE Count: %d", g.missCount), basicfont.Face7x13, 1, 23, color.White)
+	g.drawHUD(screen)
+	if g.waveBannerTicks > 0 {
+		message := fmt.Sprintf("WAVE %d", g.wave)
+		if isBossWave(g.wave) {
+			message = fmt.Sprintf("BOSS WAVE %d", g.wave)
+		}
+		g.drawCenteredText(screen, message, 110, color.White)
+	}
+}
+
+func (g *Game) drawHUD(screen *ebiten.Image) {
+	text.Draw(screen, fmt.Sprintf("Score: %d", g.score), basicfont.Face7x13, 1, 12, color.White)
+	text.Draw(screen, fmt.Sprintf("Wave: %d", g.wave), basicfont.Face7x13, 1, 25, color.White)
+	text.Draw(screen, fmt.Sprintf("KIEE: %d/%d", min(g.missCount, specialCost), specialCost), basicfont.Face7x13, 1, 38, color.White)
+	text.Draw(screen, fmt.Sprintf("Combo: %d  x%d", g.combo, g.comboMultiplier()), basicfont.Face7x13, 1, 51, color.White)
+	if g.debug {
+		text.Draw(screen, "DEBUG: INVINCIBLE  B:BOSS  K:KIEE", basicfont.Face7x13, 1, screenHeight-4, color.RGBA{R: 255, G: 210, B: 60, A: 255})
+	}
+
+	if g.boss == nil {
+		return
+	}
+	const (
+		barX      = 238
+		barY      = 10
+		barWidth  = 220
+		barHeight = 10
+	)
+	text.Draw(screen, "BOSS", basicfont.Face7x13, barX-38, barY+9, color.White)
+	ebitenutil.DrawRect(screen, barX, barY, barWidth, barHeight, color.RGBA{R: 60, G: 20, B: 20, A: 255})
+	hpWidth := barWidth * float64(max(0, g.boss.hp)) / float64(g.boss.maxHP)
+	ebitenutil.DrawRect(screen, barX, barY, hpWidth, barHeight, color.RGBA{R: 230, G: 45, B: 35, A: 255})
 }
 
 func drawImageAt(screen, img *ebiten.Image, position point) {

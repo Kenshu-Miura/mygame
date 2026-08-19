@@ -65,9 +65,14 @@
     <main>
       <h1>UFO撃ち落としたことありますか？</h1>
       <div class="game-frame">
-        <iframe src="game.html" title="UFOシューティングゲーム" allow="autoplay" scrolling="no"></iframe>
+        <iframe id="game" title="UFOシューティングゲーム" allow="autoplay" scrolling="no"></iframe>
       </div>
       <p class="controls">← →: 移動 / Space: 発射・スタート / ↑: 必殺技 / Esc: リスタート</p>
     </main>
+    <script>
+      const gameFrame = document.querySelector("#game");
+      const debug = new URLSearchParams(window.location.search).get("debug") === "1";
+      gameFrame.src = debug ? "game.html?debug=1" : "game.html";
+    </script>
   </body>
 </html>
