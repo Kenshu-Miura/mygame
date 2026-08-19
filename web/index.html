@@ -26,8 +26,8 @@
       }
 
       main {
-        width: min(100%, 72rem);
-        padding: 1.25rem;
+        width: 100%;
+        padding: clamp(0.5rem, 2vw, 1.25rem);
         text-align: center;
       }
 
@@ -37,9 +37,9 @@
       }
 
       .game-frame {
-        width: min(100%, 640px);
+        width: min(96vw, 960px, calc((100dvh - 8rem) * 4 / 3));
         aspect-ratio: 4 / 3;
-        margin: 1rem auto;
+        margin: clamp(0.5rem, 1.5vh, 1rem) auto;
         overflow: hidden;
         background: #000;
         border: 1px solid #59678f;

@@ -36,6 +36,9 @@ const (
 	specialCost     = 20
 )
 
+// The raised fingertip is about 11% of the way across ebisan.png.
+const playerFingerTipXRatio = 0.11
+
 type gameState uint8
 
 const (
@@ -296,7 +299,7 @@ func (g *Game) handlePlayerInput() {
 	if inpututil.IsKeyJustPressed(ebiten.KeySpace) {
 		projectileWidth := float64(g.projectileImg.Bounds().Dx())
 		g.projectiles = append(g.projectiles, point{
-			x: g.player.x + playerWidth/2 - projectileWidth/2,
+			x: g.player.x + playerWidth*playerFingerTipXRatio - projectileWidth/2,
 			y: g.player.y,
 		})
 		replay(g.shotSound)
